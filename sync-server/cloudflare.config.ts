@@ -9,6 +9,7 @@ const worker = defineWorker({
   exports: {
     GroupLedger: exports.durableObject({ storage: 'sqlite' }),
     AccountDirectory: exports.durableObject({ storage: 'sqlite' }),
+    AccessRegistry: exports.durableObject({ storage: 'sqlite' }),
   },
 });
 
@@ -19,6 +20,7 @@ export default defineConfig({
     env: {
       GROUPS: bindings.durableObject({ worker, exportName: 'GroupLedger' as const }),
       ACCOUNTS: bindings.durableObject({ worker, exportName: 'AccountDirectory' as const }),
+      ACCESS: bindings.durableObject({ worker, exportName: 'AccessRegistry' as const }),
       GOOGLE_CLIENT_ID: bindings.text(GOOGLE_CLIENT_ID),
     },
   },

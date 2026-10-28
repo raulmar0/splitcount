@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { Check, Copy, Link2, Share2, Users, ArrowRight, RefreshCw } from 'lucide-react';
 import Modal from './Modal.jsx';
 import { buildInviteLink } from './sync.js';
+import { sharedGroupLimit, sharedGroupLimitMessage } from './group-limits.js';
 
-export function ShareDialog({ group, onShare, onClose }) {
+export function ShareDialog({ group, onShare, onClose, sharedCount = 0, signedIn = false, onSignIn, alreadyRegistered = false, blockedReason = '', pendingApproval = false }) {
   const selfId = group._selfId || group.members.find(m => m.id === 'you')?.id || group.members[0].id;
   const self = group.members.find(m => m.id === selfId);
   const [name, setName] = useState(self.name === 'Tú' ? '' : self.name);
@@ -11,8 +12,10 @@ export function ShareDialog({ group, onShare, onClose }) {
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const link = group._shared ? buildInviteLink(group._shared) : '';
+  const atLimit = !group._shared && !alreadyRegistered && sharedCount >= sharedGroupLimit(signedIn);
   async function share(e) {
     e.preventDefault();
+    if (blockedReason || atLimit) return setError(blockedReason || sharedGroupLimitMessage(signedIn));
     if (!name.trim()) return setError('Escribe tu nombre para que tus amigos te reconozcan.');
     if (group.members.some(m => m.id !== selfId && m.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase())) return setError('Ese nombre ya lo usa otra persona del grupo.');
     setBusy(true); setError('');
@@ -21,8 +24,25 @@ export function ShareDialog({ group, onShare, onClose }) {
   async function copy() {
     try { await navigator.clipboard.writeText(link); setCopied(true); } catch { setError('Selecciona y copia el enlace del campo de arriba.'); }
   }
-  return <Modal title={group._shared ? 'Comparte el grupo' : 'Un mismo grupo, entre todos'} subtitle={group.name} onClose={onClose} closeDisabled={busy}>
-    {group._shared ? <div className="form-stack share-form"><p className="share-intro">Los gastos, pagos y balances se actualizan para todas las personas del grupo.</p><label>Enlace de invitación<div className="share-link-field"><input aria-label="Enlace de invitación" readOnly value={link} onFocus={e => e.target.select()} /><button className="button primary" onClick={copy}>{copied ? <Check size={17} /> : <Copy size={17} />}{copied ? 'Copiado' : 'Copiar'}</button></div></label><p className="share-permission"><Users size={18} />Cualquier persona con este enlace puede ver y editar el grupo. Compártelo solo con quienes participan.</p><div className="share-settings"><span className="shared-badge"><span />Sincronización activada</span><span>{group.members.length} integrantes</span></div>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><button className="button secondary" onClick={onClose}>Listo</button></div></div> : <form onSubmit={share} className="form-stack share-form"><p className="share-intro">Activa un enlace para que tus amigos puedan añadir gastos y consultar las mismas cuentas, desde su propio teléfono.</p><label>Tu nombre<input autoFocus required maxLength={40} placeholder="Como te conocen tus amigos" value={name} onChange={e => setName(e.target.value)} /></label><p className="share-permission"><Link2 size={18} />Se compartirá este grupo y sus movimientos. Quienes tengan el enlace podrán verlos y editarlos.</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><button className="button secondary" type="button" onClick={onClose} disabled={busy}>Cancelar</button><button className="button primary" type="submit" disabled={busy}><Share2 size={16} />{busy ? 'Preparando enlace…' : 'Crear enlace'}</button></div></form>}
+  return <Modal title={group._shared ? 'Comparte el grupo' : 'Compartir grupo'} subtitle={group.name} onClose={onClose} closeDisabled={busy}>
+    {group._shared ? <div className="form-stack share-form">
+      <p className="share-intro">Los gastos, pagos y balances se actualizan para todas las personas del grupo.</p>
+      <label>Enlace de invitación<div className="share-link-field"><input aria-label="Enlace de invitación" readOnly value={link} onFocus={e => e.target.select()} /><button className="button primary" onClick={copy}>{copied ? <Check size={17} /> : <Copy size={17} />}{copied ? 'Copiado' : 'Copiar'}</button></div></label>
+      <p className="share-permission"><Users size={18} />Cualquier persona con este enlace puede ver y editar el grupo. Compártelo solo con quienes participan.</p>
+      <div className="share-settings"><span className="shared-badge"><span />Sincronización activada</span><span>{group.members.length} integrantes</span></div>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="modal-actions"><button className="button secondary" onClick={onClose}>Listo</button></div>
+    </div> : blockedReason || atLimit ? <div className="form-stack share-form">
+      <p className="share-intro" role="status">{blockedReason || sharedGroupLimitMessage(signedIn)}</p>
+      <div className="modal-actions"><button className="button secondary" onClick={onClose}>Cerrar</button>{onSignIn && (!signedIn || blockedReason) && <button className="button primary" onClick={onSignIn}>{pendingApproval ? 'Ver aprobación' : signedIn ? 'Ver mi cuenta' : 'Iniciar sesión con Google'}</button>}</div>
+    </div> : <form onSubmit={share} className="form-stack share-form">
+      <p className="settings-note">{sharedCount} de {sharedGroupLimit(signedIn)} {signedIn ? 'grupos compartidos' : 'grupo compartido'}. Grupos locales ilimitados y sin límite de movimientos.</p>
+      <p className="share-intro">Activa un enlace para que tus amigos puedan añadir gastos y consultar las mismas cuentas, desde su propio teléfono.</p>
+      <label>Tu nombre<input autoFocus required maxLength={40} placeholder="Como te conocen tus amigos" value={name} onChange={e => setName(e.target.value)} /></label>
+      <p className="share-permission"><Link2 size={18} />Se compartirá este grupo y sus movimientos. Quienes tengan el enlace podrán verlos y editarlos.</p>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="modal-actions"><button className="button secondary" type="button" onClick={onClose} disabled={busy}>Cancelar</button><button className="button primary" type="submit" disabled={busy}><Share2 size={16} />{busy ? 'Preparando enlace…' : 'Crear enlace'}</button></div>
+    </form>}
   </Modal>;
 }
 

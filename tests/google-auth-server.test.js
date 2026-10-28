@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { authenticateGoogleRequest, verifyGoogleToken } from '../sync-server/src/google-auth.js';
 import { handleRequest } from '../sync-server/src/service.js';
 import { GOOGLE_CLIENT_ID } from '../src/google-config.js';
+import { AccessStore } from '../sync-server/src/access-store.js';
 
 const now = new Date('2026-10-28T18:00:00Z');
 const seconds = now.getTime() / 1000;
@@ -88,7 +89,9 @@ test('the complete profile route fetches public Google keys and verifies the sig
     const current = Math.floor(Date.now() / 1000);
     const token = await sign({ ...claims, iat: current, exp: current + 3600 });
     const request = new Request('https://api.example/auth/me', { headers: { Authorization: `Bearer ${token}`, Origin: 'https://raulmar0.github.io' } });
-    const response = await handleRequest(request, { GOOGLE_CLIENT_ID });
+    const data = new Map();
+    const access = new AccessStore({ async get(key) { return structuredClone(data.get(key)); }, async put(key, value) { data.set(key, structuredClone(value)); } });
+    const response = await handleRequest(request, { GOOGLE_CLIENT_ID, ACCESS: { idFromName: value => value, get() { return access; } } });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('Cache-Control'), 'no-store');
     assert.equal((await response.json()).user.id, claims.sub);

@@ -2,8 +2,6 @@ import { validateState } from './domain.js';
 
 export const MAX_GROUP_BYTES = 256 * 1024;
 export const MAX_MEMBERS = 100;
-export const MAX_HISTORY = 2000;
-export const MAX_CHANGES = 2 * MAX_HISTORY + MAX_MEMBERS + 1;
 
 const DETAILS = ['name', 'emoji', 'currency', 'description'];
 const FIELDS = {
@@ -43,7 +41,7 @@ function entity(value, collection) {
 /** Keep credentials, sync bookkeeping and draft fields out of shared storage. */
 export function canonicalizeGroup(input) {
   if (!isRecord(input) || !COLLECTIONS.every(key => Array.isArray(input[key]))) throw new SyncValidationError();
-  if (input.members.length > MAX_MEMBERS || input.expenses.length > MAX_HISTORY || input.settlements.length > MAX_HISTORY) throw new SyncValidationError('Este grupo tiene demasiados registros.');
+  if (input.members.length > MAX_MEMBERS) throw new SyncValidationError('Este grupo tiene demasiadas personas.');
   const group = {
     id: input.id,
     ...pick(input, DETAILS),
@@ -95,7 +93,7 @@ export function diffGroups(beforeGroup, afterGroup) {
 
 function normalizeChanges(changes) {
   const invalid = () => { throw new SyncValidationError('Los cambios enviados no son válidos.', 'invalid_changes'); };
-  if (!Array.isArray(changes) || changes.length > MAX_CHANGES) invalid();
+  if (!Array.isArray(changes)) invalid();
   const targets = new Set();
   return changes.map(change => {
     if (!isRecord(change) || !Object.hasOwn(FIELDS, change.collection)

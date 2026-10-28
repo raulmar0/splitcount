@@ -10,6 +10,7 @@ import { STORAGE_KEY } from '../src/domain.js';
 import { fetchSharedGroup, commitSharedGroup } from '../src/sync.js';
 import useAccountSync from '../src/useAccountSync.js';
 import useGroupSync from '../src/useGroupSync.js';
+import { workspaceAccess } from '../src/workspace-access.js';
 
 const { act } = Renderer;
 const keys = ['fetch', 'localStorage', 'IS_REACT_ACT_ENVIRONMENT', 'addEventListener', 'removeEventListener', 'setInterval', 'clearInterval', 'location', 'history'];
@@ -80,7 +81,7 @@ function cloud() {
       const controller = new AbortController();
       const user = { id, name: `Cuenta ${id}`, email: `${id}@example.test` };
       return {
-        account: user, session: { user, expiresAt: Date.now() + 3600000 }, signal: controller.signal,
+        account: user, access: { status: 'approved', isAdmin: false }, session: { user, expiresAt: Date.now() + 3600000, access: { status: 'approved', isAdmin: false } }, signal: controller.signal,
         request: (path, options = {}) => accountRequest(`fixture-${id}`, path, {
           ...options, signal: controller.signal,
           fetcher: (url, init) => store(directories, id, storage => new AccountStore(storage, env)).fetch(new Request(url, init)),
@@ -99,7 +100,8 @@ async function mount(auth, initial = emptyState(), hash = '') {
     const [session, setAuth] = React.useState(auth);
     const [paused, setPaused] = React.useState(false);
     const register = React.useRef(null);
-    const ledger = useGroupSync({ state, setState, enabled: !!session.session, signal: session.signal, registerShared: (group, options) => register.current(group, options) });
+    const mode = workspaceAccess(session);
+    const ledger = useGroupSync({ state, setState, enabled: mode.groupSyncEnabled, signal: mode.groupSyncSignal, registerShared: mode.accountId ? (group, options) => register.current(group, options) : undefined });
     const account = useAccountSync({ auth: session, state, setState, paused: paused || !!ledger.joinState });
     register.current = account.registerShared;
     latest = { state, setState, setAuth, setPaused, ledger, account };
@@ -129,7 +131,264 @@ test('workspace caches isolate accounts, preserve guest data, and clear only the
   assert.deepEqual(loadWorkspace(null, storage), guest);
   assert.ok(values.has(STORAGE_KEY));
   values.set(accountStorageKey('A'), JSON.stringify(guest));
-  assert.deepEqual(loadWorkspace('A', storage), emptyState());
+  assert.deepEqual(loadWorkspace('A', storage), guest);
+});
+
+test('account caches keep unlimited local groups through sign-out without retaining remote capabilities', () => {
+  const values = new Map(), storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
+  const locals = Array.from({ length: 12 }, local);
+  const shared = { ...local(), _shared: { token: 'a'.repeat(43), revision: 1 }, _account: { sourceId: 'create:test', version: 1 } };
+  shared._shared.id = shared.id;
+  const account = { version: 1, activeGroupId: shared.id, groups: [locals[0], shared, ...locals.slice(1)], accountRevision: 9 };
+  const other = { version: 1, activeGroupId: locals[0].id, groups: [locals[0]] };
+  assert.equal(saveWorkspace(account, 'A', storage), true);
+  assert.equal(saveWorkspace(other, 'B', storage), true);
+  assert.deepEqual(loadWorkspace('A', storage), account);
+  clearAccountCache('A', storage);
+  assert.deepEqual(loadWorkspace('A', storage), { version: 1, activeGroupId: locals[0].id, groups: locals });
+  assert.deepEqual(loadWorkspace('B', storage), other);
+  assert.equal(loadWorkspace('A', storage).groups.some(group => group._shared || group._account), false);
+  assert.equal(loadWorkspace('A', storage).accountRevision, undefined);
+});
+
+test('account caches reject incomplete cloud metadata and invalid local groups', () => {
+  const values = new Map(), storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  const group = local();
+  for (const invalid of [
+    { ...group, members: [] },
+    { ...group, _account: { sourceId: 'create:test', version: 1 } },
+    { ...group, _shared: { id: group.id, token: 'a'.repeat(43), revision: 1 } },
+    { ...group, _shared: null },
+  ]) {
+    const state = { version: 1, activeGroupId: group.id, groups: [invalid] };
+    assert.equal(saveWorkspace(state, 'A', storage), false);
+    values.set(accountStorageKey('A'), JSON.stringify(state));
+    assert.deepEqual(loadWorkspace('A', storage), emptyState());
+  }
+});
+
+test('directory recovery preserves local edits and removes only missing account groups', async () => {
+  const service = cloud(), a = await mount(service.auth());
+  let removed, kept;
+  await act(async () => {
+    removed = await a.current.account.createGroup(local());
+    kept = await a.current.account.createGroup(local());
+  });
+  const source = local();
+  const auth = service.auth();
+  const b = await mount(auth, { ...a.current.state, activeGroupId: source.id, groups: [source, ...a.current.state.groups] });
+  assert.deepEqual(b.current.state.groups.map(group => group.id), [source.id, removed.id, kept.id]);
+  const gate = defer(), started = defer(), fetcher = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    const response = await fetcher(url, options);
+    if (String(url).endsWith(kept.id)) { started.resolve(); await gate.promise; }
+    return response;
+  };
+  await act(async () => a.current.account.leaveGroup(removed));
+  let recovery;
+  await act(async () => { recovery = b.current.account.refresh(); await started.promise; });
+  const added = local();
+  await act(async () => b.current.setState(previous => ({
+    ...previous, activeGroupId: added.id,
+    groups: [...previous.groups.map(group => group.id === source.id ? { ...group, name: 'Edición local durante recuperación' } : group), added],
+  })));
+  await act(async () => { gate.resolve(); await recovery; });
+  assert.deepEqual(b.current.state.groups.map(group => group.id), [source.id, kept.id, added.id]);
+  assert.equal(b.current.state.groups[0].name, 'Edición local durante recuperación');
+  assert.equal(b.current.state.activeGroupId, added.id);
+  assert.equal(service.ledgers.size, 2, 'local groups never create cloud ledgers during recovery');
+});
+
+test('publishing a local workspace group replaces it in place and retries without duplicates', async () => {
+  const service = cloud(), first = local(), source = local(), last = local();
+  const a = await mount(service.auth(), { version: 1, activeGroupId: source.id, groups: [first, source, last] });
+  let published;
+  await act(async () => { published = await a.current.account.createGroup(source); });
+  assert.notEqual(published.id, source.id);
+  assert.deepEqual(a.current.state.groups.map(group => group.id), [first.id, published.id, last.id]);
+  assert.equal(a.current.state.activeGroupId, published.id);
+  assert.ok(a.current.state.groups[1]._shared);
+  assert.ok(a.current.state.groups[1]._account);
+  await act(async () => a.current.account.createGroup(source));
+  assert.deepEqual(a.current.state.groups.map(group => group.id), [first.id, published.id, last.id]);
+  assert.equal(service.ledgers.size, 1);
+});
+
+test('retrying a lost publication response replaces its local source after cloud recovery', async () => {
+  const service = cloud(), auth = service.auth(), source = local(), other = local();
+  const a = await mount(auth, { version: 1, activeGroupId: source.id, groups: [source, other] });
+  const request = auth.request;
+  let lose = true;
+  auth.request = async (path, options) => {
+    const result = await request(path, options);
+    if (options?.method === 'POST' && lose) { lose = false; throw new Error('response lost'); }
+    return result;
+  };
+  await act(async () => assert.rejects(a.current.account.createGroup(source), /lost/));
+  assert.deepEqual(a.current.state.groups, [source, other]);
+  await act(async () => a.current.account.refresh());
+  assert.equal(a.current.state.groups.length, 3);
+  const published = a.current.state.groups.find(group => group._account);
+  await act(async () => a.current.account.createGroup(source));
+  assert.deepEqual(a.current.state.groups.map(group => group.id), [published.id, other.id]);
+  assert.equal(a.current.state.activeGroupId, published.id);
+  assert.equal(service.ledgers.size, 1);
+});
+
+test('incorporating a stale guest original cannot overwrite newer account-local expenses or allocate a ledger', async () => {
+  const service = cloud(), a = await mount(service.auth()), guest = local();
+  await act(async () => a.current.account.restoreBackup([guest]));
+  const edited = { ...guest, expenses: [expense('account-local-expense')] };
+  await act(async () => a.current.ledger.saveGroup(edited, a.current.state.groups[0]));
+  const before = structuredClone(a.current.state);
+  await act(async () => assert.rejects(a.current.account.incorporate([guest]), { code: 'local_conflict' }));
+  assert.deepEqual(a.current.state, before);
+  assert.equal(service.ledgers.size, 0);
+  await act(async () => a.current.account.incorporate([edited]));
+  assert.equal(a.current.state.groups.length, 1);
+  assert.ok(a.current.state.groups[0]._account);
+  assert.deepEqual(a.current.state.groups[0].expenses, edited.expenses);
+  assert.equal(service.ledgers.size, 1);
+});
+
+test('publishing the current local group accepts the selected member name and identity change', async () => {
+  const service = cloud(), source = local();
+  const a = await mount(service.auth(), { version: 1, activeGroupId: source.id, groups: [source] });
+  const submitted = { ...source, _selfId: 'ana', members: source.members.map(member => member.id === 'ana' ? { ...member, name: 'Anita' } : member) };
+  await act(async () => a.current.account.createGroup(submitted));
+  assert.equal(a.current.state.groups.length, 1);
+  assert.ok(a.current.state.groups[0]._account);
+  assert.equal(a.current.state.groups[0]._selfId, 'ana');
+  assert.equal(a.current.state.groups[0].members[1].name, 'Anita');
+});
+
+test('a publication response preserves edits made during its request and keeps its remote registration', async () => {
+  const service = cloud(), auth = service.auth(), source = local();
+  const a = await mount(auth, { version: 1, activeGroupId: source.id, groups: [source] });
+  const gate = defer(), started = defer(), request = auth.request;
+  auth.request = async (path, options) => {
+    const result = await request(path, options);
+    if (options?.method === 'POST') { started.resolve(); await gate.promise; }
+    return result;
+  };
+  let publishing;
+  await act(async () => { publishing = a.current.account.createGroup(source); await started.promise; });
+  const edited = { ...source, expenses: [expense('edited-during-publication')] };
+  await act(async () => a.current.ledger.saveGroup(edited, source));
+  await act(async () => { gate.resolve(); await assert.rejects(publishing, { code: 'local_conflict' }); });
+  assert.deepEqual(a.current.state.groups[0], edited);
+  assert.equal(a.current.state.activeGroupId, source.id);
+  assert.equal(a.current.state.groups.length, 2);
+  const published = a.current.state.groups[1];
+  assert.ok(published._account);
+  assert.deepEqual((await fetchSharedGroup(published._shared)).group.expenses, []);
+  await act(async () => assert.rejects(a.current.account.createGroup(source), { code: 'local_conflict' }));
+  assert.deepEqual(a.current.state.groups[0], edited);
+  assert.equal(a.current.state.groups.length, 2);
+  assert.equal(service.ledgers.size, 1);
+});
+
+test('signed-in local creation works with six cloud groups and an expired session without requests', async () => {
+  const service = cloud(), auth = service.auth(), a = await mount(auth);
+  await act(async () => { for (let index = 0; index < 6; index++) await a.current.account.createGroup(local()); });
+  const request = auth.request;
+  auth.request = () => assert.fail('local creation must not request the account');
+  globalThis.fetch = () => assert.fail('local creation must not request a ledger');
+  const first = local();
+  await act(async () => assert.equal(a.current.account.addLocalGroup(first), first));
+  await act(async () => { auth.expire(); a.current.setAuth({ ...auth }); });
+  const second = local();
+  await act(async () => a.current.account.addLocalGroup(second));
+  assert.equal(a.current.account.status, 'expired');
+  assert.equal(a.current.state.groups.length, 8);
+  assert.deepEqual(a.current.state.groups.slice(-2), [first, second]);
+  assert.equal(service.ledgers.size, 6);
+  assert.equal(service.directories.size, 1);
+  auth.request = request;
+});
+
+test('local creation rejects malformed groups, cloud metadata, and duplicate ids', async () => {
+  const service = cloud(), a = await mount(service.auth()), source = local();
+  const before = structuredClone(a.current.state);
+  for (const group of [
+    { ...source, members: [] },
+    { ...source, _shared: { id: source.id, token: 'a'.repeat(43), revision: 1 } },
+    { ...source, _account: { sourceId: 'create:test', version: 1 } },
+  ]) assert.throws(() => a.current.account.addLocalGroup(group), { code: 'invalid_group' });
+  assert.deepEqual(a.current.state, before);
+  await act(async () => a.current.account.addLocalGroup(source));
+  assert.throws(() => a.current.account.addLocalGroup(source), { code: 'invalid_group' });
+  assert.deepEqual(a.current.state.groups, [source]);
+});
+
+test('backup restore keeps local rows local, registers shared rows, and safely repeats identical rows', async () => {
+  const service = cloud(), owner = await mount(service.auth('owner'));
+  let shared;
+  await act(async () => { shared = await owner.current.account.createGroup(local()); });
+  const a = await mount(service.auth()), first = local(), last = local();
+  const legacy = { ...first, _account: { version: 2, sourceId: 'legacy:local' } };
+  const backup = [legacy, shared, last], original = JSON.stringify(backup);
+  await act(async () => a.current.account.restoreBackup(backup));
+  assert.deepEqual(a.current.state.groups.map(group => group.id), [first.id, shared.id, last.id]);
+  assert.deepEqual(a.current.state.groups[0], first);
+  assert.deepEqual(a.current.state.groups[2], last);
+  assert.ok(a.current.state.groups[1]._shared);
+  assert.ok(a.current.state.groups[1]._account);
+  const reorderedLegacy = Object.fromEntries(Object.entries(legacy).reverse());
+  await act(async () => a.current.account.restoreBackup([reorderedLegacy, shared, last]));
+  assert.deepEqual(a.current.state.groups.map(group => group.id), [first.id, shared.id, last.id]);
+  assert.equal(service.ledgers.size, 1, 'local backup rows never allocate ledgers');
+  assert.equal(JSON.stringify(backup), original, 'restore never strips metadata from its input');
+});
+
+test('a shared backup failure retains completed local and shared rows for a later retry', async () => {
+  const service = cloud(), owner = await mount(service.auth('owner'));
+  let firstShared, secondShared;
+  await act(async () => {
+    firstShared = await owner.current.account.createGroup(local());
+    secondShared = await owner.current.account.createGroup(local());
+  });
+  const auth = service.auth(), a = await mount(auth), first = local(), last = local();
+  const request = auth.request;
+  let lose = true;
+  auth.request = (path, options) => {
+    if (options?.body?.id === secondShared.id && lose) { lose = false; throw new Error('shared restore offline'); }
+    return request(path, options);
+  };
+  const backup = [first, firstShared, secondShared, last];
+  await act(async () => assert.rejects(a.current.account.restoreBackup(backup), /offline/));
+  assert.deepEqual(a.current.state.groups.map(group => group.id), [first.id, firstShared.id]);
+  await act(async () => a.current.account.restoreBackup(backup));
+  assert.deepEqual(a.current.state.groups.map(group => group.id), [first.id, firstShared.id, secondShared.id, last.id]);
+  assert.equal(service.ledgers.size, 2);
+});
+
+test('backup restore reports conflicting local ids without replacing current local data', async () => {
+  const service = cloud(), source = { ...local(), _selfId: 'ana' };
+  const a = await mount(service.auth(), { version: 1, activeGroupId: source.id, groups: [source] });
+  const before = structuredClone(a.current.state);
+  await act(async () => assert.rejects(a.current.account.restoreBackup([{ ...source, name: 'Different backup data' }]), {
+    code: 'local_conflict', message: /grupo local.*distint/i,
+  }));
+  assert.deepEqual(a.current.state, before);
+  await act(async () => assert.rejects(a.current.account.restoreBackup([{ ...source, _selfId: 'you' }]), { code: 'local_conflict' }));
+  assert.deepEqual(a.current.state, before);
+});
+
+test('local-only backup restore works expired and retries before a render without requests or duplicates', async () => {
+  const service = cloud(), auth = service.auth(), a = await mount(auth);
+  await act(async () => { auth.expire(); a.current.setAuth({ ...auth }); });
+  auth.request = () => assert.fail('local-only restore must not request the account');
+  globalThis.fetch = () => assert.fail('local-only restore must not request a ledger');
+  const first = local(), second = local();
+  const backup = [{ ...first, _account: { version: 1, sourceId: 'legacy:local' } }, second];
+  await act(async () => {
+    await a.current.account.restoreBackup(backup);
+    await a.current.account.restoreBackup(backup);
+  });
+  assert.deepEqual(a.current.state.groups, [first, second]);
+  assert.equal(a.current.account.status, 'expired');
+  assert.equal(service.ledgers.size, 0);
 });
 
 test('requests distinguish invalid Google tokens from invalid invitation keys and reject untrusted paths', async () => {
@@ -142,6 +401,125 @@ test('requests distinguish invalid Google tokens from invalid invitation keys an
   }
   await assert.rejects(accountRequest('fixture', 'https://evil.example', { fetcher: () => assert.fail('credential leakage') }), { code: 'invalid_request' });
   assert.throws(() => validateDirectory({ revision: 1, groups: [{}] }));
+});
+
+test('admin paths keep credentials on approved API routes and reject path traversal before fetch', async () => {
+  const paths = ['/admin/accounts', '/admin/accounts/subject%40example.test', '/admin/push', '/admin/push/test'];
+  for (const path of paths) {
+    const result = await accountRequest('fixture', path, { base: 'https://api.example/', fetcher: async (url, options) => {
+      assert.equal(url, `https://api.example${path}`);
+      assert.equal(options.headers.Authorization, 'Bearer fixture');
+      assert.equal(options.credentials, 'omit');
+      assert.equal(options.referrerPolicy, 'no-referrer');
+      return Response.json({ ok: true });
+    } });
+    assert.deepEqual(result, { ok: true });
+  }
+  for (const path of [
+    'https://evil.example/admin/accounts', '//evil.example/admin/accounts', '/admin/accounts/../push',
+    '/admin/accounts/%2e%2e', '/admin/accounts/%2Fother', '/admin/accounts/%252e%252e',
+    '/admin/accounts/subject?token=secret', '/admin/accounts/subject#other', '/admin/accounts/a/b',
+    '/admin/accounts/subject%5Cother', '/admin/push/../accounts', '/admin/push/test?next=https://evil.example',
+  ]) {
+    await assert.rejects(accountRequest('fixture', path, { fetcher: () => assert.fail('credential leakage') }), { code: 'invalid_request' });
+  }
+});
+
+test('pending and rejected accounts skip cloud reads, polling and every account mutation while keeping local work', async () => {
+  for (const status of ['pending', 'rejected']) {
+    const service = cloud(), auth = service.auth(), source = local();
+    auth.access = auth.session.access = { status, isAdmin: false };
+    auth.request = () => assert.fail('unapproved account request');
+    let polls = 0;
+    globalThis.setInterval = () => { polls++; return 1; };
+    const before = { version: 1, activeGroupId: source.id, groups: [source] };
+    const app = await mount(auth, before);
+    assert.equal(app.current.account.status, status === 'pending' ? 'pending_approval' : 'rejected');
+    assert.equal(polls, 0);
+    await act(async () => app.current.account.refresh());
+    const remote = { ...local(), _account: { version: 1, sourceId: 'source' }, _shared: { revision: 1, token: 'a'.repeat(43) } };
+    remote._shared.id = remote.id;
+    for (const operation of [
+      () => app.current.account.createGroup(source),
+      () => app.current.account.incorporate([source]),
+      () => app.current.account.registerShared(remote),
+      () => app.current.account.chooseIdentity(remote, 'you'),
+      () => app.current.account.leaveGroup(remote),
+    ]) await act(async () => assert.rejects(Promise.resolve().then(operation), { code: `account_${status}` }));
+    assert.deepEqual(app.current.state, before);
+    assert.equal(service.ledgers.size, 0);
+    const added = local(), restored = local();
+    await act(async () => { app.current.account.addLocalGroup(added); await app.current.account.restoreBackup([restored]); });
+    await act(async () => app.current.ledger.saveGroup({ ...source, name: 'Edición pendiente' }, source));
+    assert.deepEqual(app.current.state.groups.map(group => group.id), [source.id, added.id, restored.id]);
+    assert.equal(app.current.state.groups[0].name, 'Edición pendiente');
+    assert.equal(app.current.account.status, status === 'pending' ? 'pending_approval' : 'rejected');
+    assert.equal(service.ledgers.size, 0);
+  }
+});
+
+test('pending approval permits one guest shared group and its edits without an account request', async () => {
+  const service = cloud(), auth = service.auth(), source = local(), second = local();
+  auth.access = auth.session.access = { status: 'pending', isAdmin: false };
+  auth.request = () => assert.fail('pending users must use anonymous sharing, not account routes');
+  const app = await mount(auth, { version: 1, activeGroupId: source.id, groups: [source, second] });
+  let shared;
+  await act(async () => { shared = await app.current.ledger.shareGroup(source, 'Raúl', 'you'); });
+  assert.equal(shared._account, undefined);
+  assert.equal(service.ledgers.size, 1);
+  assert.equal(service.directories.size, 0);
+  await act(async () => app.current.ledger.saveGroup({ ...shared, expenses: [expense('pending-expense')] }, shared));
+  await act(async () => app.current.ledger.joinGroup(shared._shared));
+  assert.equal(app.current.state.groups.filter(group => group._shared).length, 1);
+  assert.equal(app.current.state.groups[0].expenses.length, 1);
+  await act(async () => assert.rejects(app.current.ledger.shareGroup(second, 'Raúl', 'you'), { code: 'shared_group_limit' }));
+  await act(async () => app.current.ledger.joinGroup({ ...shared._shared, id: crypto.randomUUID() }));
+  assert.match(app.current.ledger.joinState.error, /1 grupo compartido/);
+  assert.equal(service.ledgers.size, 1);
+  await act(async () => { auth.expire(); app.current.setAuth({ ...auth }); });
+  const before = app.current.state.groups.find(group => group.id === shared.id);
+  await act(async () => app.current.ledger.saveGroup({ ...before, name: 'Sigue compartido al vencer Google' }, before));
+  assert.equal(app.current.state.groups[0].name, 'Sigue compartido al vencer Google');
+});
+
+test('a guest publication survives pending sign-in expiry and sign-out without losing its group', async () => {
+  cloud();
+  const auth = { account: null, session: null, access: null, request: () => assert.fail('anonymous operation used account API') };
+  const source = local(), app = await mount(auth, { version: 1, activeGroupId: source.id, groups: [source] });
+  const gate = defer(), originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (options?.method === 'POST') await gate.promise;
+    return originalFetch(url, options);
+  };
+  let publishing;
+  await act(async () => { publishing = app.current.ledger.shareGroup(source, 'Raúl', 'you'); });
+  const controller = new AbortController();
+  const pending = { account: { id: 'pending' }, session: { expiresAt: Date.now() + 60000 }, access: { status: 'pending', isAdmin: false }, signal: controller.signal, request: auth.request };
+  await act(async () => app.current.setAuth(pending));
+  await act(async () => { controller.abort(); app.current.setAuth({ ...pending, session: null, signal: undefined }); });
+  await act(async () => app.current.setAuth(auth));
+  await act(async () => { gate.resolve(); await publishing; });
+  assert.equal(app.current.state.groups.length, 1);
+  assert.ok(app.current.state.groups[0]._shared);
+  assert.equal(app.current.state.groups[0]._selfId, 'you');
+  assert.equal(app.current.state.groups[0]._account, undefined);
+});
+
+test('a same-session approval upgrade starts recovery immediately and preserves local groups and the active workspace', async () => {
+  const service = cloud(), auth = service.auth(), source = local();
+  auth.access = auth.session.access = { status: 'pending', isAdmin: false };
+  const app = await mount(auth, { version: 1, activeGroupId: source.id, groups: [source] });
+  const expiresAt = auth.session.expiresAt, signal = auth.signal;
+  assert.equal(app.current.account.status, 'pending_approval');
+  await act(async () => app.current.setAuth({ ...auth, access: { status: 'approved', isAdmin: false }, session: { ...auth.session, access: { status: 'approved', isAdmin: false } } }));
+  assert.equal(app.current.account.status, 'synced');
+  assert.deepEqual(app.current.state.groups, [source]);
+  assert.equal(app.current.state.activeGroupId, source.id);
+  assert.equal(auth.session.expiresAt, expiresAt);
+  assert.equal(auth.signal, signal);
+  await act(async () => app.current.account.createGroup(source));
+  assert.equal(service.ledgers.size, 1);
+  assert.ok(app.current.state.groups[0]._account);
 });
 
 test('same account recovers groups and identity on two devices; concurrent expenses survive and leaving propagates', async () => {

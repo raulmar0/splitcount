@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { GroupStore, handleRequest } from '../sync-server/src/service.js';
 import { AccountStore, MAX_ACCOUNT_BYTES, MAX_ACCOUNT_GROUPS, MAX_ACCOUNT_OPERATIONS, MAX_ACCOUNT_REQUEST_BYTES } from '../sync-server/src/account-store.js';
 import { diffGroups } from '../src/sync-protocol.js';
+import { AccessStore } from '../sync-server/src/access-store.js';
 
 const ORIGIN = 'https://raulmar0.github.io';
 const CLIENT_ID = 'account-tests.apps.googleusercontent.com';
@@ -58,7 +59,15 @@ function service() {
       } };
     },
   });
-  const env = { GOOGLE_CLIENT_ID: CLIENT_ID };
+  // These ledger tests exercise accounts that the owner has already approved.
+  const accessData = new Map([['access-registry', { revision: 2, subscriptions: [], accounts: ['A', 'B'].map(id => ({
+    id, email: `${id.toLowerCase()}@example.test`, name: `${id}@example.test`, status: 'approved', requestedAt: 1, updatedAt: 1, version: 2,
+  })) }]]);
+  const access = new AccessStore({
+    async get(key) { return structuredClone(accessData.get(key)); },
+    async put(key, value) { accessData.set(key, structuredClone(value)); },
+  });
+  const env = { GOOGLE_CLIENT_ID: CLIENT_ID, ACCESS: { idFromName: value => value, get() { return access; } } };
   env.GROUPS = namespace(groups, storage => new GroupStore(storage));
   env.ACCOUNTS = namespace(accounts, storage => new AccountStore(storage, env), true);
   return {
@@ -364,4 +373,101 @@ test('active group, alias/tombstone and total JSON bounds fail safely without ev
   };
   assert.equal((await api.create(linkBody(entry, 'failed-alias'))).response.status, 500);
   assert.equal((await api.create(linkBody(entry, 'failed-alias'))).response.status, 200);
+});
+
+test('six active groups block creation and new invitations while retries, edits and leaving remain available', async () => {
+  const api = service();
+  const entries = [];
+  for (let index = 0; index < 6; index += 1) {
+    const created = await api.create(createBody(`create-${index}`));
+    assert.equal(created.response.status, 201);
+    entries.push(created.data.entry);
+  }
+  const { data: invitation } = await api.create(createBody('invitation'), { account: 'B' });
+  const ledgerCount = api.groups.size;
+  const extra = await api.create(createBody('seventh'));
+  assert.equal(extra.response.status, 409);
+  assert.equal(extra.data.error, 'account_limit');
+  assert.equal(api.groups.size, ledgerCount);
+  const join = await api.create(linkBody(invitation.entry, 'join-seventh'));
+  assert.equal(join.response.status, 409);
+  assert.equal(join.data.error, 'account_limit');
+  assert.equal((await api.create(createBody('create-0'))).response.status, 200);
+  assert.equal((await api.create(linkBody(entries[0], 'existing-at-capacity'))).response.status, 200);
+  const identity = await api.request(`/account/groups/${entries[0].id}`, { method: 'PATCH', body: { selfId: 'bea', version: 1 } });
+  assert.equal(identity.response.status, 200);
+  assert.equal(identity.data.entry.selfId, 'bea');
+  assert.equal((await api.request(`/account/groups/${entries[1].id}`, { method: 'DELETE', body: { version: 1 } })).response.status, 200);
+  assert.equal((await api.create(linkBody(invitation.entry, 'join-after-leaving'))).response.status, 201);
+  assert.equal((await api.request()).data.groups.length, 6);
+});
+
+test('simultaneous creates compete for the final account slot', async () => {
+  const api = service();
+  for (let index = 0; index < 5; index += 1) await api.create(createBody(`initial-${index}`));
+  const results = await Promise.all([api.create(createBody('sixth')), api.create(createBody('seventh'))]);
+  assert.deepEqual(results.map(result => result.response.status).sort(), [201, 409]);
+  assert.equal(api.groups.size, 6);
+  assert.equal((await api.request()).data.groups.length, 6);
+});
+
+test('an interrupted create reserves the sixth slot and can complete its original retry', async () => {
+  const api = service();
+  for (let index = 0; index < 5; index += 1) await api.create(createBody(`initial-${index}`));
+  const { data: invitation } = await api.create(createBody('invitation'), { account: 'B' });
+  api.interruptNextInitialize();
+  assert.equal((await api.create(createBody('reserved-sixth'))).response.status, 500);
+  const pending = api.accounts.get('A').data.get('directory').operations.find(operation => operation.sourceId === 'reserved-sixth');
+  assert.ok(pending.pending);
+  api.recreate();
+  const extra = await api.create(createBody('blocked-seventh'));
+  assert.equal(extra.response.status, 409);
+  assert.equal(extra.data.error, 'account_limit');
+  const join = await api.create(linkBody(invitation.entry, 'blocked-invitation'));
+  assert.equal(join.response.status, 409);
+  assert.equal(join.data.error, 'account_limit');
+  assert.equal(api.groups.size, 7);
+  const recovered = await api.create(createBody('reserved-sixth'));
+  assert.equal(recovered.response.status, 201);
+  assert.equal(recovered.data.entry.id, pending.id);
+  assert.equal((await api.request()).data.groups.length, 6);
+});
+
+test('older directories above six retain access and retries without admitting more groups', async () => {
+  const api = service();
+  const { data: first } = await api.create(createBody('original'));
+  const { data: second } = await api.create(createBody('legacy-second'), { account: 'B' });
+  const object = api.accounts.get('A');
+  const state = structuredClone(object.data.get('directory'));
+  state.rows = [state.rows[0], { ...state.rows[0], ...second.entry }, ...Array.from({ length: 5 }, () => ({ ...state.rows[0], id: crypto.randomUUID() }))];
+  object.data.set('directory', state);
+  api.recreate();
+  assert.equal((await api.request()).data.groups.length, 7);
+  assert.equal((await api.create(createBody('original'))).response.status, 200);
+  assert.equal((await api.request(`/account/groups/${first.entry.id}`, { method: 'PATCH', body: { selfId: 'bea', version: 1 } })).response.status, 200);
+  const ledgerEdit = await api.request(`/groups/${first.entry.id}`, { method: 'PATCH', token: first.entry.token, body: { changes: diffGroups(first.envelope.group, { ...first.envelope.group, name: 'Still editable' }) } });
+  assert.equal(ledgerEdit.response.status, 200);
+  assert.equal((await api.create(createBody('extra'))).response.status, 409);
+  assert.equal((await api.request(`/account/groups/${first.entry.id}`, { method: 'DELETE', body: { version: 2 } })).response.status, 200);
+  assert.equal((await api.create(createBody('still-at-six'))).response.status, 409);
+  assert.equal((await api.request(`/account/groups/${second.entry.id}`, { method: 'DELETE', body: { version: 1 } })).response.status, 200);
+  assert.equal((await api.create(createBody('available-after-leaving'))).response.status, 201);
+});
+
+test('a reservation accepted by an older account limit remains recoverable above six groups', async () => {
+  const api = service();
+  await api.create(createBody('existing'));
+  api.interruptNextInitialize();
+  assert.equal((await api.create(createBody('older-reservation'))).response.status, 500);
+  const object = api.accounts.get('A');
+  const state = structuredClone(object.data.get('directory'));
+  const pending = state.operations.find(operation => operation.sourceId === 'older-reservation');
+  state.rows.push(...Array.from({ length: 6 }, () => ({ ...state.rows[0], id: crypto.randomUUID() })));
+  object.data.set('directory', state);
+  api.recreate();
+  const recovered = await api.create(createBody('older-reservation'));
+  assert.equal(recovered.response.status, 201);
+  assert.equal(recovered.data.entry.id, pending.id);
+  assert.equal((await api.request()).data.groups.length, 8);
+  assert.equal((await api.create(createBody('new-over-limit'))).response.status, 409);
 });

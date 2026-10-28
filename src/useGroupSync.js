@@ -5,6 +5,7 @@ import {
 } from './sync.js';
 import { canonicalizeGroup } from './sync-protocol.js';
 import { validateState } from './domain.js';
+import { assertSharedGroupCapacity } from './group-limits.js';
 
 const INVALID_SHARING = 'Este grupo tiene datos de sincronización inválidos. Conservamos tu copia local.';
 const OFFLINE = 'Sin conexión. Conservamos la última copia del grupo.';
@@ -15,16 +16,17 @@ const messageOf = error => error instanceof Error && error.message
   ? error.message : 'No se pudo sincronizar el grupo. Vuelve a intentarlo.';
 const failureStatus = error => isOffline() || error?.code === 'network' ? 'offline' : 'error';
 
-export default function useGroupSync({ state, setState, onJoined, enabled = true, signal, registerShared }) {
-  const access = useRef({ enabled, signal, registerShared });
-  access.current = { enabled, signal, registerShared };
+export default function useGroupSync({ state, setState, onJoined, enabled = true, signal, registerShared, disabledReason }) {
+  const access = useRef({ enabled, signal, registerShared, disabledReason });
+  access.current = { enabled, signal, registerShared, disabledReason };
   const sameAccess = scope => access.current.enabled && access.current.signal === scope.signal && !scope.signal?.aborted;
-  const requireAccess = (scope = access.current) => { if (!sameAccess(scope)) throw new SyncError('Vuelve a iniciar sesión para guardar en tu cuenta. Tu borrador se conserva.', 'auth_required'); };
+  const requireAccess = (scope = access.current) => { if (!sameAccess(scope)) throw new SyncError(scope.disabledReason?.message || 'Vuelve a iniciar sesión para guardar en tu cuenta. Tu borrador se conserva.', scope.disabledReason?.code || 'auth_required'); };
   const stateRef = useRef(state);
   stateRef.current = state;
   const onJoinedRef = useRef(onJoined);
   onJoinedRef.current = onJoined;
   const pendingSet = useRef(new Set());
+  const pendingAdmissions = useRef(new Map());
   const pollingSet = useRef(new Set());
   const mounted = useRef(true);
   const initialInviteHandled = useRef(false);
@@ -103,9 +105,14 @@ export default function useGroupSync({ state, setState, onJoined, enabled = true
     const attempt = ++joinAttempt.current;
     lastInvite.current = capability;
     const scope = access.current;
+    const admission = Symbol('join');
     setJoinState({ loading: true, error: '' });
     try {
       requireAccess(scope);
+      if (!scope.registerShared) {
+        assertSharedGroupCapacity(stateRef.current.groups, [...pendingAdmissions.current.values(), capability?.id]);
+        pendingAdmissions.current.set(admission, capability?.id);
+      }
       const envelope = await fetchSharedGroup(capability, { signal: scope.signal });
       if (!mounted.current || !sameAccess(scope) || attempt !== joinAttempt.current) return null;
       const existing = stateRef.current.groups.find(group => group.id === capability.id);
@@ -146,6 +153,8 @@ export default function useGroupSync({ state, setState, onJoined, enabled = true
         setJoinState({ loading: false, error: messageOf(error) });
       }
       return null;
+    } finally {
+      pendingAdmissions.current.delete(admission);
     }
   }, [report, setState]);
 
@@ -189,7 +198,6 @@ export default function useGroupSync({ state, setState, onJoined, enabled = true
 
   const saveGroup = useCallback(async (after, before) => {
     const scope = access.current;
-    requireAccess(scope);
     const baseline = before ?? stateRef.current.groups.find(group => group.id === after.id);
     if (!baseline) throw new SyncError('Este grupo ya no está disponible.');
     if (pendingSet.current.has(baseline.id)) throw new SyncError('Espera a que termine de guardarse el cambio anterior.');
@@ -200,6 +208,7 @@ export default function useGroupSync({ state, setState, onJoined, enabled = true
       setState(previous => ({ ...previous, groups: previous.groups.map(group => group.id === baseline.id ? after : group) }));
       return after;
     }
+    requireAccess(scope);
     if (!validSharing(baseline)) throw new SyncError(INVALID_SHARING, 'access');
     pendingSet.current.add(baseline.id);
     report(baseline.id, 'pending');
@@ -232,6 +241,7 @@ export default function useGroupSync({ state, setState, onJoined, enabled = true
       return before;
     }
     if (pendingSet.current.has(before.id)) throw new SyncError('El grupo ya se está compartiendo.');
+    if (!scope.registerShared) assertSharedGroupCapacity(stateRef.current.groups, [...pendingAdmissions.current.values(), before.id]);
     const snapshot = JSON.stringify(canonicalizeGroup(before));
     const unchanged = current => {
       if (!current || hasSharing(current)) return false;
@@ -240,6 +250,8 @@ export default function useGroupSync({ state, setState, onJoined, enabled = true
     const changedError = () => new SyncError('El grupo cambió mientras se preparaba el enlace. Conservamos tu versión local; vuelve a compartirla.', 'local_changed');
     if (!unchanged(stateRef.current.groups.find(group => group.id === before.id))) throw changedError();
     pendingSet.current.add(before.id);
+    const admission = Symbol('share');
+    if (!scope.registerShared) pendingAdmissions.current.set(admission, before.id);
     report(before.id, 'pending');
     try {
       const remote = await createSharedGroup({
@@ -266,6 +278,7 @@ export default function useGroupSync({ state, setState, onJoined, enabled = true
       throw error;
     } finally {
       pendingSet.current.delete(before.id);
+      pendingAdmissions.current.delete(admission);
     }
   }, [report, setState]);
 
@@ -279,7 +292,7 @@ export default function useGroupSync({ state, setState, onJoined, enabled = true
   const status = !enabled ? 'error' : invalid ? 'error' : pendingSet.current.has(activeId) ? 'pending'
     : !hasSharing(active) ? (result?.status === 'error' || result?.status === 'offline' ? result.status : 'local')
       : isOffline() ? 'offline' : result?.status ?? 'pending';
-  const error = !enabled ? 'Vuelve a iniciar sesión para sincronizar. Tu copia se conserva.' : invalid ? INVALID_SHARING : status === 'offline' ? result?.error || OFFLINE : result?.error || '';
+  const error = !enabled ? disabledReason?.message || 'Vuelve a iniciar sesión para sincronizar. Tu copia se conserva.' : invalid ? INVALID_SHARING : status === 'offline' ? result?.error || OFFLINE : result?.error || '';
 
   return { status, error, joinState, joinGroup, retrySync, saveGroup, shareGroup, dismissJoin };
 }

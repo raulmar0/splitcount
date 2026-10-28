@@ -48,7 +48,7 @@ const response = (value, status = 200) => new Response(JSON.stringify(value), { 
 const defer = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 let latest;
 
-async function mount(groups = [local()], hash = '') {
+async function mount(groups = [local()], hash = '', options = {}) {
   latest = null;
   const events = new EventTarget();
   const intervals = new Map();
@@ -63,7 +63,7 @@ async function mount(groups = [local()], hash = '') {
   const joined = [];
   function App() {
     const [state, setState] = React.useState({ version: 1, activeGroupId: groups[0]?.id ?? null, groups });
-    const sync = useGroupSync({ state, setState, onJoined: group => joined.push(group) });
+    const sync = useGroupSync({ state, setState, ...options, onJoined: group => joined.push(group) });
     latest = { state, setState, ...sync };
     return null;
   }
@@ -84,6 +84,61 @@ test('local saves update one cached group and retain other groups', async () => 
   await act(async () => { await latest.saveGroup({ ...local(), name: 'Changed' }, local()); });
   assert.equal(latest.state.groups[0].name, 'Changed');
   assert.equal(latest.state.groups[1].id, 'other');
+  await app.close();
+});
+
+test('pending approval blocks shared requests with the approval reason while local edits still work', async () => {
+  globalThis.fetch = () => assert.fail('pending approval cannot access the API');
+  const app = await mount([local(), shared()], '', { enabled: false, disabledReason: { code: 'account_pending', message: 'Tu cuenta espera aprobación.' } });
+  const before = local();
+  await act(async () => latest.saveGroup({ ...before, name: 'Local edit while pending' }, before));
+  assert.equal(latest.state.groups[0].name, 'Local edit while pending');
+  await act(async () => assert.rejects(latest.shareGroup(before, 'Ana', 'ana'), { code: 'account_pending' }));
+  await act(async () => assert.rejects(latest.saveGroup({ ...shared(), name: 'Blocked cloud edit' }, shared()), { code: 'account_pending' }));
+  assert.match(latest.error, /aprobación/);
+  await app.close();
+});
+
+test('a guest cannot share a second group or join another invitation at capacity', async () => {
+  globalThis.fetch = async () => response(envelope(shared()));
+  const app = await mount([local(), shared()]);
+  let requests = 0;
+  globalThis.fetch = async () => { requests++; throw new Error('quota should stop before fetching'); };
+  await act(async () => assert.rejects(latest.shareGroup(local(), 'Ana', 'ana'), { code: 'shared_group_limit' }));
+  await act(async () => latest.joinGroup({ ...capability, id: '22222222-2222-4222-8222-222222222222' }));
+  assert.match(latest.joinState.error, /Google/);
+  assert.equal(requests, 0);
+  assert.equal(latest.state.groups.length, 2);
+  await app.close();
+});
+
+test('reopening the same guest shared group at capacity succeeds', async () => {
+  globalThis.fetch = async () => response(envelope(shared()));
+  const app = await mount([local(), shared()]);
+  await act(async () => latest.joinGroup(capability));
+  assert.equal(latest.joinState, null);
+  assert.equal(latest.state.groups.length, 2);
+  await app.close();
+});
+
+test('a pending guest publication reserves the only shared slot', async () => {
+  const writing = defer();
+  const second = { ...local(), id: 'another-local' };
+  let creates = 0;
+  globalThis.fetch = async (_url, options) => {
+    if (options.method !== 'POST') return response(envelope(shared()));
+    if (++creates === 1) return writing.promise;
+    throw new Error('a second publication must be rejected before fetching');
+  };
+  const app = await mount([local(), second]);
+  let sharing;
+  await act(async () => { sharing = latest.shareGroup(local(), 'Ana', 'ana'); });
+  await act(async () => assert.rejects(latest.shareGroup(second, 'Ana', 'ana'), { code: 'shared_group_limit' }));
+  await act(async () => {
+    writing.resolve(response({ ...envelope(shared()), token }));
+    await sharing;
+  });
+  assert.equal(latest.state.groups.filter(group => group._shared).length, 1);
   await app.close();
 });
 

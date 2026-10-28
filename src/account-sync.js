@@ -33,8 +33,21 @@ export function registrationBody(group, sourceId) {
     : { sourceId, group: canonicalizeGroup(group), selfId };
 }
 
+export function isAccountApiPath(path) {
+  if (typeof path !== 'string') return false;
+  if (/^\/account\/groups(?:\/[0-9a-f-]{36})?$/.test(path)
+    || ['/admin/accounts', '/admin/push', '/admin/push/test'].includes(path)) return true;
+  const match = /^\/admin\/accounts\/([^/?#\\]+)$/.exec(path);
+  if (!match) return false;
+  try {
+    const subject = decodeURIComponent(match[1]);
+    return subject.length > 0 && subject.length <= 256 && subject !== '.' && subject !== '..'
+      && !/[\/\\%\u0000-\u001f\u007f]/.test(subject) && encodeURIComponent(subject) === match[1];
+  } catch { return false; }
+}
+
 export async function accountRequest(credential, path, { method = 'GET', body, signal, fetcher = globalThis.fetch, base = SYNC_API } = {}) {
-  if (!/^\/account\/groups(?:\/[0-9a-f-]{36})?$/.test(path)) throw new SyncError('La ruta de tu cuenta no es válida.', 'invalid_request');
+  if (!isAccountApiPath(path)) throw new SyncError('La ruta de tu cuenta no es válida.', 'invalid_request');
   if (typeof credential !== 'string' || !credential) throw new SyncError('Vuelve a iniciar sesión para sincronizar tus grupos.', 'auth_required');
   let response, data;
   try {

@@ -12,6 +12,9 @@ function group() {
 function expense(id = 'food') {
   return { id, title: 'Cena', amount: 3000, paidBy: 'ana', participants: ['ana', 'bea'], shares: { ana: 1500, bea: 1500 }, splitMode: 'equal', category: 'food', date: '2026-10-27', note: '' };
 }
+function settlement(id) {
+  return { id, from: 'bea', to: 'ana', amount: 1, date: '2026-10-27' };
+}
 
 test('diff ignores group identity and local credentials while canonical data strips them', () => {
   const before = { ...group(), sync: { token: 'private' }, localOnly: true };
@@ -113,4 +116,29 @@ test('bounded shared groups reuse domain validation and drop nested local metada
   const withLocal = { ...group(), members: [{ id: 'ana', name: 'Ana', token: 'private' }, group().members[1]], expenses: [{ ...expense(), localDraft: true }] };
   assert.deepEqual(canonicalizeGroup(withLocal).members[0], { id: 'ana', name: 'Ana' });
   assert.deepEqual(canonicalizeGroup(withLocal).expenses[0], expense());
+});
+
+test('shared groups accept more than two thousand movements within the storage byte limit', () => {
+  const input = { ...group(), settlements: Array.from({ length: 2001 }, (_, index) => settlement(`payment-${index}`)) };
+  assert.equal(canonicalizeGroup(input).settlements.length, 2001);
+  const after = { ...input, settlements: [...input.settlements, settlement('next-payment')] };
+  assert.equal(applyChanges(input, diffGroups(input, after)).settlements.length, 2002);
+});
+
+test('a valid history replacement has no fixed change-count ceiling', () => {
+  const history = prefix => ({
+    ...group(),
+    expenses: Array.from({ length: 200 }, (_, index) => expense(`${prefix}-expense-${index}`)),
+    settlements: Array.from({ length: 1900 }, (_, index) => settlement(`${prefix}-payment-${index}`)),
+  });
+  const before = history('old');
+  const after = history('new');
+  const changes = diffGroups(before, after);
+  assert.equal(changes.length, 4200);
+  assert.deepEqual(applyChanges(before, changes), after);
+});
+
+test('large histories still respect the canonical group byte limit', () => {
+  const input = { ...group(), settlements: Array.from({ length: 4000 }, (_, index) => settlement(`payment-${index}`)) };
+  assert.throws(() => canonicalizeGroup(input), { code: 'invalid_group' });
 });

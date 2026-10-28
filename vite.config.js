@@ -12,6 +12,7 @@ export default defineConfig({
       registerType: 'prompt',
       includeAssets: ['manifest.webmanifest', 'brand/icon-192.png', 'brand/icon-512.png', 'brand/apple-touch-icon.png'],
       workbox: {
+        importScripts: ['push-worker.js'],
         globPatterns: ['**/*.{js,css,html,svg,png,jpg}'],
         navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,

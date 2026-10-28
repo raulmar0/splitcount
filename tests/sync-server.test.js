@@ -123,6 +123,21 @@ test('retried patches do not duplicate an expense', async () => {
   assert.equal(retry.data.group.expenses.length, 1);
 });
 
+test('creation and synchronization accept histories above the old movement-count limit', async () => {
+  const api = service();
+  const settlement = id => ({ id, from: 'bea', to: 'ana', amount: 1, date: '2026-10-27' });
+  const input = { ...group(), settlements: Array.from({ length: 2001 }, (_, index) => settlement(`payment-${index}`)) };
+  const created = await api.create(input);
+  assert.equal(created.response.status, 201);
+  const after = { ...created.data.group, settlements: [...created.data.group.settlements, settlement('next-payment')] };
+  const updated = await api.request(`/groups/${created.data.group.id}`, { method: 'PATCH', token: created.data.token, body: { changes: diffGroups(created.data.group, after) } });
+  assert.equal(updated.response.status, 200);
+  assert.equal(updated.data.group.settlements.length, 2002);
+  const read = await api.request(`/groups/${created.data.group.id}`, { token: created.data.token });
+  assert.equal(read.data.group.settlements.length, 2002);
+  assert.equal(read.data.revision, 2);
+});
+
 test('invalid batches preserve both stored data and revision', async () => {
   const api = service();
   const { data: created } = await api.create({ ...group(), expenses: [expense('food')] });

@@ -14,6 +14,9 @@ import useAccountSync from './useAccountSync.js';
 import { asGuestWorkspace, loadWorkspace, saveWorkspace } from './workspace-storage.js';
 import AuthContext from './AuthContext.js';
 import AccountImportDialog from './AccountImportDialog.jsx';
+import InstallBanner from './InstallBanner.jsx';
+import { assertSharedGroupCapacity, countSharedGroups, sharedGroupLimit, sharedCreationId } from './group-limits.js';
+import { workspaceAccess } from './workspace-access.js';
 
 const CATEGORIES = {
   food: { name: 'Comida y bebida', icon: Utensils, color: 'peach' },
@@ -35,7 +38,7 @@ function Avatar({ member, index = 0, small = false }) {
   return <span className={`avatar avatar-${index % 5} ${small ? 'small' : ''}`} title={member.name}>{member.name.slice(0, 1).toUpperCase()}</span>;
 }
 
-function GroupForm({ group, onSave, onClose, selfName }) {
+function GroupForm({ group, onSave, onClose, selfName, signedIn = false, sharedCount = 0, accountGroups = [], canShare = true, pendingApproval = false }) {
   const [name, setName] = useState(group?.name || '');
   const [emoji] = useState(group?.emoji || 'grupo');
   const [currency, setCurrency] = useState(group?.currency || 'MXN');
@@ -44,6 +47,7 @@ function GroupForm({ group, onSave, onClose, selfName }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [draftId] = useState(() => uid());
+  const [storage, setStorage] = useState('local');
   const hasHistory = group && (group.expenses.length > 0 || group.settlements.length > 0);
   async function submit(e) {
     e.preventDefault();
@@ -51,10 +55,15 @@ function GroupForm({ group, onSave, onClose, selfName }) {
     if (!name.trim()) return setError('Dale un nombre al grupo.');
     if (!cleaned) return setError('Añade al menos dos personas con nombres diferentes. Completa los nombres o quita las filas vacías.');
     setError(''); setBusy(true);
-    try { await onSave({ ...(group || { id: draftId, expenses: [], settlements: [] }), name: name.trim(), emoji, currency, description: description.trim(), members: cleaned }); } catch (error) { setError(error.message); } finally { setBusy(false); }
+    try { await onSave({ ...(group || { id: draftId, expenses: [], settlements: [] }), name: name.trim(), emoji, currency, description: description.trim(), members: cleaned }, storage); } catch (error) { setError(error.message); } finally { setBusy(false); }
   }
   return <Modal title={group ? 'Editar grupo' : 'Crear grupo'} subtitle={group ? 'Edita los detalles o suma a alguien más.' : 'Crea un grupo y deja las cuentas en nuestras manos.'} onClose={onClose} closeDisabled={busy}>
     <form onSubmit={submit} className="form-stack">
+      {!group && <>
+        {signedIn && <label>Guardar grupo<select value={storage} onChange={e => setStorage(e.target.value)} aria-describedby="group-storage-hint"><option value="local">Local · solo en este dispositivo</option><option value="shared" disabled={!canShare || sharedCount >= sharedGroupLimit(true) && sharedCreationId(accountGroups, draftId) === draftId}>Compartido · sincronizado con tu cuenta</option></select></label>}
+        {signedIn && !canShare && <p className="settings-note">La sincronización necesita una cuenta aprobada. Puedes seguir creando grupos locales.</p>}
+        <p id="group-storage-hint" className="settings-note">{storage === 'local' ? 'Los grupos locales son ilimitados y se guardan en este navegador. Puedes compartir este grupo después.' : 'Se guardará en línea y podrás compartirlo por enlace.'} {sharedCount} de {sharedGroupLimit(signedIn)} {signedIn ? 'grupos compartidos en tu cuenta' : pendingApproval ? 'grupo compartido mientras esperas aprobación' : 'grupo compartido sin cuenta'}. Sin límite de movimientos.</p>
+      </>}
       <label>Nombre del grupo<input autoFocus required maxLength={60} placeholder="¿Cuál es el próximo plan?" value={name} onChange={e => setName(e.target.value)} /></label>
       <label>Descripción <span className="optional">opcional</span><input maxLength={200} placeholder="Unas palabras sobre este grupo" value={description} onChange={e => setDescription(e.target.value)} /></label>
       <label>Moneda<select value={currency} disabled={hasHistory} onChange={e => setCurrency(e.target.value)}>{['MXN', 'USD', 'EUR'].map(c => <option key={c} value={c}>{c} · {currencyLabel(c)}</option>)}</select></label>{hasHistory && <p className="field-hint">La moneda se conserva cuando ya hay movimientos.</p>}
@@ -118,16 +127,28 @@ function EmptyState({ onAdd, filtered }) {
 
 export default function App() {
   const auth = useGoogleAuth();
-  return <AuthContext.Provider value={auth}><Workspace key={auth.account?.id ?? 'guest'} auth={auth} /></AuthContext.Provider>;
+  return <AuthContext.Provider value={auth}><Workspace key={workspaceAccess(auth).key} auth={auth} /></AuthContext.Provider>;
 }
 
 function Workspace({ auth }) {
-  const accountId = auth.account?.id;
+  const { accountId, canSyncAccount, pendingApproval, groupSyncEnabled, groupSyncSignal } = workspaceAccess(auth);
+  const approvalBlocked = !!accountId && !!auth.session && !canSyncAccount;
+  const disabledReason = approvalBlocked ? { code: auth.access?.status === 'rejected' ? 'account_rejected' : 'account_pending', message: auth.access?.status === 'rejected' ? 'Esta cuenta no tiene autorización para sincronizar. Puedes seguir usando grupos locales.' : 'Tu cuenta espera aprobación del administrador. Puedes seguir usando grupos locales.' } : undefined;
   const [state, setState] = useState(() => loadWorkspace(accountId));
   const [theme, setTheme] = useState(() => loadTheme());
   const [tab, setTab] = useState('expenses');
   const overlayHistory = useRef(null);
   const { screen, navigate, openGroup, goBack } = useAppNavigation({state,setState,onPop:handleOverlayBack});
+  const adminIntentHandled = useRef(false);
+  useEffect(() => {
+    if (!adminIntentHandled.current && new URLSearchParams(globalThis.location?.search).get('admin') === '1') {
+      adminIntentHandled.current = true;
+      navigate('settings', { replace: true });
+    }
+    const openAdmin = event => { if (event.data?.type === 'OPEN_ADMIN_DASHBOARD') navigate('settings'); };
+    globalThis.navigator?.serviceWorker?.addEventListener('message', openAdmin);
+    return () => globalThis.navigator?.serviceWorker?.removeEventListener('message', openAdmin);
+  }, [navigate]);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
   const [sort, setSort] = useState('recent');
@@ -147,7 +168,7 @@ function Workspace({ auth }) {
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 3800); return () => clearTimeout(t); }, [toast]);
   useEffect(() => { if (!groupMenu) return; const close = () => setGroupMenu(false); window.addEventListener('click', close); return () => window.removeEventListener('click', close); }, [groupMenu]);
   const registerSharedRef = useRef(null);
-  const { status: syncStatus, error: syncError, joinState, joinGroup, dismissJoin, retrySync, saveGroup, shareGroup } = useGroupSync({ state, setState, enabled: !accountId || !!auth.session, signal: auth.signal, registerShared: accountId ? (remote, options) => registerSharedRef.current(remote, options) : undefined, onJoined: remote => { openGroup(remote.id,{replace:true}); setTab('expenses'); setQuery(''); setCategory('all'); setModal(remote._selfId ? null : { type: 'identity' }); } });
+  const { status: syncStatus, error: syncError, joinState, joinGroup, dismissJoin, retrySync, saveGroup, shareGroup } = useGroupSync({ state, setState, enabled: groupSyncEnabled, disabledReason, signal: groupSyncSignal, registerShared: accountId ? (remote, options) => registerSharedRef.current(remote, options) : undefined, onJoined: remote => { openGroup(remote.id,{replace:true}); setTab('expenses'); setQuery(''); setCategory('all'); setModal(remote._selfId ? null : { type: 'identity' }); } });
   const accountSync = useAccountSync({ auth, state, setState, paused: !!modal || !!joinState });
   registerSharedRef.current = accountSync.registerShared;
   if(modal || filtersOpen || joinState) overlayHistory.current={state:globalThis.history?.state,url:globalThis.location?.href};
@@ -176,7 +197,12 @@ function Workspace({ auth }) {
   async function importJSON(event) {
     const file = event.target.files?.[0]; event.target.value = ''; if (!file) return;
     if (file.size > 5_000_000) return setToast('El respaldo debe pesar menos de 5 MB.');
-    try { const data = JSON.parse(await file.text()); if (!validateState(data)) throw new Error('invalid'); setModal({ type: 'import', data: accountId ? data : asGuestWorkspace(data) }); } catch { setToast('Este archivo no es un respaldo válido de Splitcount.'); }
+    let data;
+    try { data = JSON.parse(await file.text()); if (!validateState(data)) throw new Error('invalid'); } catch { setToast('Este archivo no es un respaldo válido de Splitcount.'); return; }
+    try {
+      if (!accountId) assertSharedGroupCapacity([], data.groups.filter(item => item._shared).map(item => item.id));
+      setModal({ type: 'import', data: accountId ? data : asGuestWorkspace(data) });
+    } catch (error) { setToast(error.message); }
   }
   const filteredExpenses = useMemo(() => group ? group.expenses.filter(exp => (category === 'all' || exp.category === category) && `${exp.title} ${memberName(group, exp.paidBy)} ${exp.note}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => sort === 'amount' ? b.amount - a.amount : b.date.localeCompare(a.date)) : [], [group, category, query, sort]);
   const categories = Object.entries(CATEGORIES).map(([key, value]) => ({ ...value, key, amount: group?.expenses.filter(exp => exp.category === key).reduce((sum, exp) => sum + exp.amount, 0) || 0 })).filter(cat => cat.amount).sort((a, b) => b.amount - a.amount);
@@ -190,17 +216,19 @@ function Workspace({ auth }) {
       <div className="sidebar-section"><span>Tus grupos</span><button className="icon-button" aria-label="Crear grupo" onClick={() => { setModal({ type: 'group' }); }}><Plus size={17} /></button></div>
       <div className="group-nav">{state.groups.map(g => <button key={g.id} className={g.id === group?.id ? 'selected' : ''} onClick={() => selectGroup(g.id)}><span className={`group-emoji ${g.id === 'oaxaca' ? 'sand' : g.id === 'casa' ? 'sage' : 'rose'}`}>{g.name.split(' ').filter(word => word.length > 2).slice(0,2).map(word => word[0]).join('')}</span><span>{g.name}</span>{g.id === group?.id && <span className="selected-dot" />}</button>)}</div>
       <button className="new-group" onClick={() => { setModal({ type: 'group' }); }}><Plus size={16} />Crear un grupo</button>
-      <div className="sidebar-bottom"><button className="help-link" onClick={() => setModal({ type: 'help' })}><HelpCircle size={18} />Cómo funciona<ArrowUpRight size={15} /></button><button className="profile" onClick={() => navigate('settings')}><span className="avatar profile-avatar">{auth.account?.name?.slice(0,1).toUpperCase() || 'T'}</span><span><strong>{auth.account?.name || 'Tu espacio'}</strong><small>{accountId ? 'Grupos en tu cuenta' : 'Modo invitado'}</small></span><Settings2 size={17} /></button></div>
+      <div className="sidebar-bottom"><button className="help-link" onClick={() => setModal({ type: 'help' })}><HelpCircle size={18} />Cómo funciona<ArrowUpRight size={15} /></button><button className="profile" onClick={() => navigate('settings')}><span className="avatar profile-avatar">{auth.account?.name?.slice(0,1).toUpperCase() || 'T'}</span><span><strong>{auth.account?.name || 'Tu espacio'}</strong><small>{accountId ? 'Grupos en tu cuenta' : pendingApproval ? 'Cuenta pendiente · modo invitado' : 'Modo invitado'}</small></span><Settings2 size={17} /></button></div>
     </aside>
 
     <div className="workspace">
       <header className="topbar"><div className="topbar-start">{screen === 'group' && <button className="icon-button mobile-back" aria-label="Volver" onClick={goBack}><ArrowLeft size={22} /></button>}<button className="mobile-brand" aria-label="Splitcount, ir a grupos" onClick={() => navigate('groups')}><img className="brand-image" src={`${import.meta.env.BASE_URL}brand/splitcount-symbol.png`} alt="" width="32" height="32" /><span>Splitcount</span></button><div className="breadcrumb desktop-only"><span>{screen === 'group' ? 'Tus grupos' : screen === 'groups' ? 'Tus grupos' : screen === 'activity' ? 'Actividad' : 'Ajustes'}</span>{screen === 'group' && group && <><ChevronRight size={15} /><strong>{group.name}</strong></>}</div></div><div className="topbar-actions">{screen === 'group' && <span className={`sync-status ${syncStatus === 'offline' || syncStatus === 'error' ? 'error' : syncStatus === 'pending' ? 'pending' : ''}`}><span />{syncLabel}</span>}<button className="theme-toggle icon-button" aria-label={theme === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'} title={theme === 'dark' ? 'Tema claro' : 'Tema oscuro'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button><button className="icon-button desktop-only" onClick={() => navigate('settings')} aria-label="Respaldos y ajustes"><Settings2 size={19} /></button></div></header>
       <main>
+        <InstallBanner />
+        {approvalBlocked && screen !== 'settings' && <div className="sync-error-banner" role="status">{disabledReason.message}<button onClick={() => navigate('settings')}>Ver mi cuenta</button></div>}
         {accountId && !auth.session && <div className="sync-error-banner" role="status">Tu sesión venció. Conservamos tus grupos y formularios.<button onClick={() => navigate('settings')}>Volver a iniciar sesión</button></div>}
         {accountId && auth.session && accountSync.error && screen !== 'settings' && <div className="sync-error-banner" role="status">{accountSync.error}<button onClick={() => { void accountSync.refresh(); }}>Reintentar</button></div>}
         {accountId && accountSync.status === 'pending' && screen === 'groups' && <p className="account-loading" role="status">Recuperando tus grupos de la cuenta…</p>}
         {storageError && <div className="storage-warning" role="alert">No se pudieron guardar los cambios en este navegador. Descarga un respaldo antes de salir.<button onClick={exportJSON}>Descargar respaldo</button></div>}
-        {screen === 'groups' ? <HomeScreen groups={state.groups} onOpen={selectGroup} onCreate={() => setModal({type:'group'})} /> : screen === 'activity' ? <ActivityScreen groups={state.groups} onOpen={(selected,item) => {selectGroup(selected.id);if(item.kind === 'payment')setTab('balances');else setModal({type:'detail',expense:item,baseGroup:selected});}} /> : screen === 'settings' ? <SettingsScreen theme={theme} onTheme={setTheme} onExport={exportJSON} onImport={() => importRef.current.click()} onHelp={() => setModal({type:'help'})} auth={auth} accountSync={accountSync} count={state.groups.length} onAddLocal={() => setModal({type:'accountImport',groups:loadWorkspace(null).groups})} /> : group ? <>
+        {screen === 'groups' ? <HomeScreen groups={state.groups} onOpen={selectGroup} onCreate={() => setModal({type:'group'})} /> : screen === 'activity' ? <ActivityScreen groups={state.groups} onOpen={(selected,item) => {selectGroup(selected.id);if(item.kind === 'payment')setTab('balances');else setModal({type:'detail',expense:item,baseGroup:selected});}} /> : screen === 'settings' ? <SettingsScreen theme={theme} onTheme={setTheme} onExport={exportJSON} onImport={() => importRef.current.click()} onHelp={() => setModal({type:'help'})} auth={auth} accountSync={accountSync} count={state.groups.length} sharedCount={countSharedGroups(state.groups)} onAddLocal={() => setModal({type:'accountImport',groups:loadWorkspace(null).groups})} /> : group ? <>
           <div className="page-intro"><div><h1>{group.name}</h1><p className="group-subtitle">{group.description || 'Gastos compartidos entre amigos.'}</p></div><div className="group-title-actions"><button className="button secondary share-button" onClick={() => setModal({ type: 'share' })}><Share2 size={17} /><span>Compartir</span></button><button className="button primary add-top" onClick={addExpense}><Plus size={18} /><span>Añadir gasto</span></button></div></div>
           {group._shared && (syncStatus === 'offline' || syncStatus === 'error') && <div className="sync-error-banner" role="status"><CloudOff size={17} /><span>{syncError || 'Mostrando la última copia del grupo.'}</span><button onClick={retrySync}>Reintentar</button></div>}
           <section className="group-cover" aria-label={`Integrantes de ${group.name}`}>
@@ -239,17 +267,17 @@ function Workspace({ auth }) {
     <input className="visually-hidden" type="file" accept="application/json,.json" ref={importRef} onChange={importJSON} aria-label="Importar respaldo JSON" tabIndex={-1} />
     {toast && <div className="toast" role="status"><CircleCheck size={19} /><span>{toast}</span><button aria-label="Cerrar aviso" onClick={() => setToast('')}><X size={16} /></button></div>}
     {joinState && <JoinDialog error={joinState.error} onRetry={() => joinGroup()} onClose={dismissJoin} />}
-    {modal?.type === 'share' && group && <ShareDialog group={group} onClose={() => setModal(null)} onShare={async (name,selfId) => { const shared=await shareGroup(group,name,selfId);openGroup(shared.id,{replace:true});setToast('El grupo ya se puede compartir.'); }} />}
+    {modal?.type === 'share' && group && <ShareDialog pendingApproval={pendingApproval} group={group} blockedReason={disabledReason?.message} alreadyRegistered={!!accountId && sharedCreationId(state.groups,group.id) !== group.id} sharedCount={countSharedGroups(state.groups)} signedIn={!!accountId} onSignIn={() => {setModal(null);navigate('settings');}} onClose={() => setModal(null)} onShare={async (name,selfId) => { const shared=accountId ? await accountSync.createGroup({...group,_selfId:selfId,members:group.members.map(member => member.id === selfId ? {...member,name} : member)}) : await shareGroup(group,name,selfId);openGroup(shared.id,{replace:true});setToast('El grupo ya se puede compartir.'); }} />}
     {modal?.type === 'identity' && group && <IdentityDialog group={group} onChoose={chooseIdentity} onAdd={addIdentity} onClose={() => setModal(null)} />}
     {modal?.type === 'expense' && group && <ExpenseForm group={modal.baseGroup || group} expense={modal.expense} onClose={() => setModal(null)} onSave={async expense => { const base = modal.baseGroup || group; await updateGroup({ ...base, expenses: modal.expense ? base.expenses.map(exp => exp.id === expense.id ? expense : exp) : [expense, ...base.expenses] },base); setModal(null); setToast(modal.expense ? 'Gasto actualizado.' : 'Gasto añadido.'); }} />}
-    {modal?.type === 'group' && <GroupForm group={modal.group} selfName={auth.account?.name} onClose={() => setModal(null)} onSave={async saved => { let result=saved;if(modal.group) { result=await updateGroup(saved,modal.group); } else if(accountId) { result=await accountSync.createGroup(saved); } else { setState(s => ({ ...s, activeGroupId: saved.id, groups: [...s.groups, saved] })); } openGroup(result.id,{replace:!!modal.group});setTab('expenses');setCategory('all');setQuery('');setModal(null);setToast(modal.group ? 'Grupo actualizado.' : 'Grupo creado.'); }} />}
+    {modal?.type === 'group' && <GroupForm pendingApproval={pendingApproval} canShare={canSyncAccount} group={modal.group} selfName={auth.account?.name} signedIn={!!accountId} accountGroups={state.groups} sharedCount={countSharedGroups(state.groups)} onClose={() => setModal(null)} onSave={async (saved,storage) => { let result=saved;if(modal.group) { result=await updateGroup(saved,modal.group); } else if(accountId && storage === 'shared') { assertSharedGroupCapacity(state.groups,[sharedCreationId(state.groups,saved.id)],true);result=await accountSync.createGroup(saved); } else if(accountId) { result=accountSync.addLocalGroup(saved); } else { setState(s => ({ ...s, activeGroupId: saved.id, groups: [...s.groups, saved] })); } openGroup(result.id,{replace:!!modal.group});setTab('expenses');setCategory('all');setQuery('');setModal(null);setToast(modal.group ? 'Grupo actualizado.' : 'Grupo creado.'); }} />}
     {modal?.type === 'payment' && group && <PaymentForm group={modal.baseGroup || group} transfer={modal.transfer} onClose={() => setModal(null)} onSave={async payment => { const base=modal.baseGroup||group;await updateGroup({ ...base, settlements: [payment, ...base.settlements] },base); setModal(null); setToast('Pago registrado.'); }} />}
     {modal?.type === 'detail' && <ExpenseDetail group={modal.baseGroup || group} expense={modal.expense} onClose={() => setModal(null)} onEdit={() => setModal({ ...modal,type: 'expense' })} onDelete={() => setModal({ ...modal,type: 'deleteExpense' })} />}
     {modal?.type === 'deleteExpense' && <ConfirmDialog title="¿Eliminar este gasto?" message={`Se eliminará “${modal.expense.title}” y se recalcularán los balances${group._shared ? ' para todo el grupo' : ''}.`} onClose={() => setModal({ ...modal,type: 'detail' })} onConfirm={async () => { const base=modal.baseGroup || group; await updateGroup({ ...base, expenses: base.expenses.filter(exp => exp.id !== modal.expense.id) },base); setModal(null); setToast('Gasto eliminado.'); }} />}
-    {modal?.type === 'deleteGroup' && <ConfirmDialog title={group._shared ? '¿Salir de este grupo?' : '¿Eliminar este grupo?'} message={accountId ? `“${group.name}” se quitará de tu cuenta en todos tus dispositivos. Los demás conservarán su acceso; puedes volver con el enlace.` : group._shared ? `“${group.name}” se quitará de este dispositivo. Los demás conservarán su acceso; puedes volver con el enlace.` : `“${group.name}” y sus movimientos se eliminarán de este dispositivo. Puedes descargar un respaldo antes.`} label={group._shared ? 'Salir del grupo' : 'Eliminar'} onClose={() => setModal(null)} onConfirm={async () => { if(accountId)await accountSync.leaveGroup(group);else setState(current => {const groups=current.groups.filter(g => g.id!==group.id);return {...current,groups,activeGroupId:groups[0]?.id||null};}); navigate('groups',{replace:true});setModal(null);setToast(accountId ? 'Saliste del grupo en tu cuenta.' : group._shared ? 'Saliste del grupo en este dispositivo.' : 'Grupo eliminado.'); }} />}
+    {modal?.type === 'deleteGroup' && <ConfirmDialog title={group._shared ? '¿Salir de este grupo?' : '¿Eliminar este grupo?'} message={accountId && group._shared ? `“${group.name}” se quitará de tu cuenta en todos tus dispositivos. Los demás conservarán su acceso; puedes volver con el enlace.` : group._shared ? `“${group.name}” se quitará de este dispositivo. Los demás conservarán su acceso; puedes volver con el enlace.` : `“${group.name}” y sus movimientos se eliminarán de este dispositivo. Puedes descargar un respaldo antes.`} label={group._shared ? 'Salir del grupo' : 'Eliminar'} onClose={() => setModal(null)} onConfirm={async () => { if(accountId && group._shared)await accountSync.leaveGroup(group);else setState(current => {const groups=current.groups.filter(g => g.id!==group.id);return {...current,groups,activeGroupId:groups[0]?.id||null};}); navigate('groups',{replace:true});setModal(null);setToast(accountId && group._shared ? 'Saliste del grupo en tu cuenta.' : group._shared ? 'Saliste del grupo en este dispositivo.' : 'Grupo eliminado.'); }} />}
     {modal?.type === 'deletePayment' && <ConfirmDialog title="¿Eliminar este pago?" message="Los balances volverán a incluir el importe de este pago." onClose={() => setModal(null)} onConfirm={async () => { await updateGroup({ ...group, settlements: group.settlements.filter(p => p.id !== modal.payment.id) }); setModal(null); setToast('Pago eliminado.'); }} />}
-    {modal?.type === 'import' && <ConfirmDialog title="Tu respaldo está listo." message={accountId ? `Se añadirán ${modal.data.groups.length} grupos a tu cuenta en línea, sin borrar los que ya tienes. Los grupos vinculados no se duplican; sus datos actuales en línea se conservan.` : `Se importarán ${modal.data.groups.length} grupos. Esto reemplazará los datos actuales de este dispositivo. Descarga un respaldo primero si quieres conservarlos.`} label={accountId ? 'Añadir a mi cuenta' : 'Importar respaldo'} onClose={() => setModal(null)} onConfirm={async () => { if(accountId)await accountSync.incorporate(modal.data.groups);else setState(modal.data);navigate('groups',{replace:true});setTab('expenses'); setQuery(''); setCategory('all'); setModal(null); setToast('Respaldo importado. Todo en su lugar.'); }} />}
-    {modal?.type === 'accountImport' && <AccountImportDialog groups={modal.groups} onClose={() => setModal(null)} onImport={async groups => {await accountSync.incorporate(groups);setModal(null);setToast('Grupos añadidos a tu cuenta.');}} />}
+    {modal?.type === 'import' && <ConfirmDialog title="Tu respaldo está listo." message={accountId ? `Se añadirán ${modal.data.groups.filter(item => item._shared).length} grupos compartidos a tu cuenta y ${modal.data.groups.filter(item => !item._shared).length} locales a este navegador, sin borrar los existentes. Los compartidos cuentan dentro del límite de 6; los locales son ilimitados. Si falla una incorporación, las anteriores se conservan.` : `Se importarán ${modal.data.groups.length} grupos. Esto reemplazará los datos actuales de este dispositivo. Descarga un respaldo primero si quieres conservarlos.`} label={accountId ? 'Añadir a mi cuenta' : 'Importar respaldo'} onClose={() => setModal(null)} onConfirm={async () => { if(accountId) {await accountSync.restoreBackup(modal.data.groups);} else {assertSharedGroupCapacity([],modal.data.groups.filter(item => item._shared).map(item => item.id));setState(modal.data);}navigate('groups',{replace:true});setTab('expenses'); setQuery(''); setCategory('all'); setModal(null); setToast('Respaldo importado. Todo en su lugar.'); }} />}
+    {modal?.type === 'accountImport' && <AccountImportDialog groups={modal.groups} sharedCount={countSharedGroups(state.groups)} onClose={() => setModal(null)} onImport={async groups => {await accountSync.incorporate(groups);setModal(null);setToast('Grupos añadidos a tu cuenta.');}} />}
     {modal?.type === 'data' && <Modal title="Tus planes, a salvo." subtitle="Tus datos son tuyos. Guárdalos y llévalos contigo." onClose={() => setModal(null)}><div className="data-options"><button onClick={exportJSON}><span className="category-icon mint"><FileJson size={22} /></span><span><strong>Descargar un respaldo</strong><small>Todos tus grupos, gastos y pagos en JSON</small></span><Download size={19} /></button><button onClick={() => { setModal(null); importRef.current.click(); }}><span className="category-icon lavender"><Upload size={22} /></span><span><strong>Importar un respaldo</strong><small>Recupera tus datos en este dispositivo</small></span><ChevronRight size={19} /></button></div><p className="info-note"><ShieldCheck size={19} />Los grupos compartidos se guardan en línea y se sincronizan. Los grupos locales permanecen en este navegador. Tu respaldo JSON incluye los enlaces privados: guárdalo solo donde tú puedas acceder.</p><div className="data-stats"><span><strong>{state.groups.length}</strong> grupos</span><span><strong>{state.groups.reduce((sum, g) => sum + g.expenses.length, 0)}</strong> gastos</span><span><strong>{state.groups.reduce((sum, g) => sum + g.settlements.length, 0)}</strong> pagos</span></div></Modal>}
     {modal?.type === 'help' && <Modal title="Compartir, así de fácil." subtitle="Tres pasos para que las cuentas no se interpongan." onClose={() => setModal(null)}><div className="help-steps">{[['Armen el grupo', 'Ponle nombre al plan y añade a las personas que lo comparten.'], ['Anoten los gastos', 'Elige quién pagó y reparte por igual o con importes exactos.'], ['Queden a mano', 'Splitcount calcula quién debe a quién. Registren los pagos que hagan por fuera.']].map(([title, text]) => <div key={title}><div><h3>{title}</h3><p>{text}</p></div></div>)}</div><p className="info-note"><ShieldCheck size={19} />Usa Compartir para activar la sincronización de un grupo e invitar por enlace. Cada persona elige su nombre para ver su saldo. Los grupos iniciales son de ejemplo.</p><button className="button primary full-width" onClick={() => setModal(null)}>Vamos al plan<ArrowRight size={17} /></button></Modal>}
   </div>;

@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { GroupStore, handleRequest } from './service.js';
 import { AccountStore } from './account-store.js';
+import { AccessStore } from './access-store.js';
 
 export class GroupLedger extends DurableObject {
   constructor(ctx, env) {
@@ -15,6 +16,15 @@ export class AccountDirectory extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.store = new AccountStore(ctx.storage, env);
+  }
+
+  fetch(request) { return this.store.fetch(request); }
+}
+
+export class AccessRegistry extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.store = new AccessStore(ctx.storage, { waitUntil: task => ctx.waitUntil(task) });
   }
 
   fetch(request) { return this.store.fetch(request); }

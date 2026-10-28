@@ -12,7 +12,7 @@ const originals = new Map(globals.map(key => [key, Object.getOwnPropertyDescript
 const originalConsoleError = console.error;
 const originalNow = Date.now;
 const roots = [];
-const profile = () => ({ user: { id: 'google-user', name: 'Ana', email: 'ana@gmail.com' }, expiresAt: Date.now() + 3600000 });
+const profile = (access = { status: 'approved', isAdmin: false }) => ({ user: { id: 'google-user', name: 'Ana', email: 'ana@gmail.com' }, expiresAt: Date.now() + 3600000, access });
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -60,6 +60,16 @@ test('handles invalid credentials, rejected tokens, unavailable backend and netw
   await assert.rejects(verifyGoogleCredential('test', { fetcher: async () => new Response('{') }), /respuesta inválida/);
   for (const data of [{}, { ...profile(), expiresAt: Date.now() - 1 }, { ...profile(), expiresAt: Date.now() + 86400000 }, { ...profile(), user: { name: 'Ana' } }]) {
     await assert.rejects(verifyGoogleCredential('test', { fetcher: async () => Response.json(data) }), /cuenta inválida/);
+  }
+});
+
+test('verification fails closed when the server omits or malforms account approval', async () => {
+  for (const access of [undefined, null, {}, { status: 'approved' }, { status: 'pending', isAdmin: 'false' }, { status: 'other', isAdmin: false }]) {
+    await assert.rejects(verifyGoogleCredential('test', { fetcher: async () => Response.json({ ...profile(), access }) }), /cuenta inválida/);
+  }
+  for (const status of ['pending', 'rejected']) {
+    const expected = profile({ status, isAdmin: false });
+    assert.deepEqual(await verifyGoogleCredential('test', { fetcher: async () => Response.json(expected) }), expected);
   }
 });
 
@@ -127,7 +137,104 @@ test('focus after expiry retains account scope for drafts and asks for another s
   await act(async () => events.dispatchEvent(new Event('focus')));
   assert.equal(app.auth.session, null);
   assert.equal(app.auth.account.id, expected.user.id);
+  assert.deepEqual(app.auth.access, expected.access);
   assert.match(app.auth.error, /sesión venció/);
+});
+
+test('pending and rejected sessions stay signed in but block account requests before any credential is sent', async () => {
+  for (const status of ['pending', 'rejected']) {
+    const expected = profile({ status, isAdmin: false });
+    globalThis.fetch = async () => Response.json(expected);
+    const app = await mount();
+    await act(async () => { app.signIn(); });
+    assert.deepEqual(app.auth.session, expected);
+    assert.deepEqual(app.auth.access, expected.access);
+    globalThis.fetch = () => assert.fail('unapproved accounts must not send requests');
+    for (const method of ['GET', 'POST', 'PATCH', 'DELETE']) {
+      await assert.rejects(app.auth.request('/account/groups', { method }), { code: `account_${status}` });
+    }
+    await assert.rejects(app.auth.request('/admin/accounts'), { code: 'forbidden' });
+    await act(async () => app.auth.signOut());
+    assert.equal(app.auth.access, null);
+  }
+});
+
+test('refreshing approval updates the same account and session signal without clearing local storage', async () => {
+  let expected = profile({ status: 'pending', isAdmin: false });
+  globalThis.localStorage = { removeItem() { assert.fail('approval refresh must keep the workspace'); }, setItem() { assert.fail('auth must not persist tokens'); } };
+  globalThis.fetch = async url => {
+    assert.ok(String(url).endsWith('/auth/me'));
+    return Response.json(expected);
+  };
+  const app = await mount();
+  await act(async () => { app.signIn(); });
+  const signal = app.auth.signal;
+  expected = profile();
+  await act(async () => { assert.deepEqual(await app.auth.refreshAccess(), expected); });
+  assert.equal(app.auth.account.id, 'google-user');
+  assert.equal(app.auth.signal, signal);
+  assert.equal(signal.aborted, false);
+  assert.deepEqual(app.auth.access, { status: 'approved', isAdmin: false });
+  globalThis.fetch = async () => Response.json({ revision: 0, groups: [] });
+  assert.deepEqual(await app.auth.request('/account/groups'), { revision: 0, groups: [] });
+});
+
+test('a server approval rejection disables later requests while retaining the signed-in local workspace', async () => {
+  globalThis.fetch = async () => Response.json(profile());
+  const app = await mount();
+  await act(async () => { app.signIn(); });
+  const signal = app.auth.signal;
+  let resolve;
+  globalThis.fetch = async () => new Promise(done => { resolve = done; });
+  const earlier = app.auth.request('/account/groups');
+  const discarded = assert.rejects(earlier, { code: 'account_rejected' });
+  globalThis.fetch = async () => Response.json({ error: 'account_rejected', message: 'Acceso rechazado.' }, { status: 403 });
+  await act(async () => assert.rejects(app.auth.request('/account/groups'), { code: 'account_rejected' }));
+  assert.equal(app.auth.account.id, 'google-user');
+  assert.ok(app.auth.session);
+  assert.equal(app.auth.signal, signal);
+  assert.equal(app.auth.access.status, 'rejected');
+  assert.equal(app.auth.session.access.status, 'rejected');
+  await act(async () => { resolve(Response.json({ revision: 0, groups: [] })); await discarded; });
+  globalThis.fetch = () => assert.fail('rejected account must stop cloud requests');
+  await assert.rejects(app.auth.request('/account/groups'), { code: 'account_rejected' });
+});
+
+test('authenticated requests cannot override the API destination or credential transport', async () => {
+  globalThis.fetch = async () => Response.json(profile({ status: 'approved', isAdmin: true }));
+  const app = await mount();
+  await act(async () => { app.signIn(); });
+  globalThis.fetch = async (url, options) => {
+    assert.ok(String(url).endsWith('/admin/push'));
+    assert.equal(String(url).includes('evil.example'), false);
+    assert.equal(options.headers.Authorization, 'Bearer test-credential');
+    return Response.json({ ok: true });
+  };
+  assert.deepEqual(await app.auth.request('/admin/push', {
+    base: 'https://evil.example', fetcher: () => assert.fail('untrusted transport'),
+  }), { ok: true });
+});
+
+test('admin access comes only from approved server roles and expires before all account or admin requests', async () => {
+  for (const access of [{ status: 'approved', isAdmin: false }, { status: 'approved', isAdmin: true }]) {
+    const expected = { ...profile(access), user: { ...profile().user, email: 'raulhdz40@gmail.com' } };
+    globalThis.fetch = async () => Response.json(expected);
+    const app = await mount();
+    await act(async () => { app.signIn(); });
+    if (!access.isAdmin) {
+      globalThis.fetch = () => assert.fail('an email address cannot authorize admin requests');
+      await assert.rejects(app.auth.request('/admin/accounts'), { code: 'forbidden' });
+    } else {
+      globalThis.fetch = async () => Response.json({ accounts: [] });
+      assert.deepEqual(await app.auth.request('/admin/accounts'), { accounts: [] });
+    }
+    Date.now = () => expected.expiresAt + 1;
+    await act(async () => assert.rejects(app.auth.request('/account/groups'), { code: 'auth_required' }));
+    await act(async () => assert.rejects(app.auth.request('/admin/accounts'), { code: 'auth_required' }));
+    await act(async () => assert.rejects(app.auth.refreshAccess(), { code: 'auth_required' }));
+    Date.now = originalNow;
+    await act(async () => app.auth.signOut());
+  }
 });
 
 test('authenticated requests are cancelled on logout and delayed data cannot cross sessions', async () => {

@@ -43,6 +43,12 @@ export async function verifyGoogleCredential(credential, { fetcher = globalThis.
   try { data = await response.json(); } catch { throw new Error('El servidor devolvió una respuesta inválida. Vuelve a intentarlo.'); }
   if (typeof data?.user?.id !== 'string' || !data.user.id || typeof data.user.name !== 'string'
     || typeof data.user.email !== 'string' || !data.user.email || !Number.isSafeInteger(data.expiresAt)
-    || data.expiresAt <= Date.now() || data.expiresAt > Date.now() + 7200000) throw new Error('El servidor devolvió una cuenta inválida. Vuelve a iniciar sesión.');
-  return { user: { id: data.user.id, name: data.user.name, email: data.user.email }, expiresAt: data.expiresAt };
+    || data.expiresAt <= Date.now() || data.expiresAt > Date.now() + 7200000
+    || !['pending', 'approved', 'rejected'].includes(data.access?.status) || typeof data.access?.isAdmin !== 'boolean') {
+    throw new Error('El servidor devolvió una cuenta inválida. Vuelve a iniciar sesión.');
+  }
+  return {
+    user: { id: data.user.id, name: data.user.name, email: data.user.email }, expiresAt: data.expiresAt,
+    access: { status: data.access.status, isAdmin: data.access.isAdmin },
+  };
 }

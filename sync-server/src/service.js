@@ -1,5 +1,6 @@
 import { applyChanges, canonicalizeGroup, MAX_GROUP_BYTES, SyncConflictError, SyncValidationError } from '../../src/sync-protocol.js';
 import { authenticateGoogleRequest, GoogleAuthError } from './google-auth.js';
+import { isAdminUser } from './access-store.js';
 
 const VERSION = '1.0.0';
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
@@ -132,6 +133,25 @@ export class GroupStore {
   }
 }
 
+function accessRegistry(env) {
+  if (!env.ACCESS?.idFromName || !env.ACCESS?.get) throw new HttpError(503, 'access_unavailable', 'No pudimos consultar el acceso de la cuenta. Vuelve a intentarlo.');
+  return env.ACCESS.get(env.ACCESS.idFromName('access-registry'));
+}
+
+async function accountAccess(user, env) {
+  const stub = accessRegistry(env);
+  let response;
+  try {
+    response = await stub.fetch(new Request('https://internal/session', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user }),
+    }));
+  } catch { throw new HttpError(503, 'access_unavailable', 'No pudimos consultar el acceso de la cuenta. Vuelve a intentarlo.'); }
+  if (!response.ok) throw new HttpError(503, 'access_unavailable', 'No pudimos consultar el acceso de la cuenta. Vuelve a intentarlo.');
+  const access = await response.json();
+  if (!['pending', 'approved', 'rejected'].includes(access?.status) || typeof access.isAdmin !== 'boolean') throw new HttpError(503, 'access_unavailable', 'No pudimos consultar el acceso de la cuenta. Vuelve a intentarlo.');
+  return access;
+}
+
 export async function handleRequest(request, env) {
   const origin = request.headers.get('Origin');
   try {
@@ -139,9 +159,29 @@ export async function handleRequest(request, env) {
     if (request.method === 'OPTIONS') return withCors(new Response(null, { status: 204 }), origin);
     const path = new URL(request.url).pathname;
     if (request.method === 'GET' && path === '/health') return withCors(json({ service: 'entre-sync', version: VERSION }), origin);
-    if (request.method === 'GET' && path === '/auth/me') return withCors(json(await authenticateGoogleRequest(request, env.GOOGLE_CLIENT_ID)), origin);
+    if (request.method === 'GET' && path === '/auth/me') {
+      const session = await authenticateGoogleRequest(request, env.GOOGLE_CLIENT_ID);
+      return withCors(json({ ...session, access: await accountAccess(session.user, env) }), origin);
+    }
+    if (path === '/admin' || path.startsWith('/admin/')) {
+      const { user } = await authenticateGoogleRequest(request, env.GOOGLE_CLIENT_ID);
+      if (!isAdminUser(user)) throw new HttpError(403, 'admin_forbidden', 'Solo la cuenta administradora puede abrir este panel.');
+      const stub = accessRegistry(env);
+      if (request.method === 'PATCH' && path.startsWith('/admin/accounts/')) {
+        let target;
+        try { target = decodeURIComponent(path.slice('/admin/accounts/'.length)); }
+        catch { throw new HttpError(400, 'invalid_access_request', 'Los datos de acceso no son válidos.'); }
+        if (target === user.id) throw new HttpError(403, 'owner_protected', 'La cuenta administradora conserva su acceso.');
+      }
+      const forwarded = new Request(request);
+      forwarded.headers.delete('Authorization');
+      try { return withCors(await stub.fetch(forwarded), origin); }
+      catch { throw new HttpError(503, 'access_unavailable', 'No pudimos consultar el panel de acceso. Vuelve a intentarlo.'); }
+    }
     if (path === '/account/groups' || path.startsWith('/account/groups/')) {
       const { user } = await authenticateGoogleRequest(request, env.GOOGLE_CLIENT_ID);
+      const access = await accountAccess(user, env);
+      if (access.status !== 'approved') throw new HttpError(403, `account_${access.status}`, access.status === 'pending' ? 'Tu cuenta está pendiente de aprobación.' : 'El acceso de esta cuenta fue rechazado.');
       const forwarded = new Request(request);
       forwarded.headers.delete('Authorization');
       const stub = env.ACCOUNTS.get(env.ACCOUNTS.idFromName(user.id));

@@ -33,6 +33,8 @@ test('production build registers a scoped worker and precaches the app without t
     const registration = await readFile(join(outDir, 'registerSW.js'), 'utf8');
     assert.match(registration, /register\('\.\/sw\.js', \{ scope: '\.\/'/);
     const worker = await readFile(join(outDir, 'sw.js'), 'utf8');
+    assert.match(worker, /push-worker\.js/);
+    assert.ok((await readFile(join(outDir, 'push-worker.js'), 'utf8')).includes('notificationclick'));
     assert.match(worker, /index\.html/);
     assert.match(worker, /brand\/icon-192\.png/);
     assert.match(worker, /brand\/icon-512\.png/);
@@ -43,7 +45,9 @@ test('production build registers a scoped worker and precaches the app without t
     assert.doesNotMatch(worker, /registerRoute\([^;]*CacheFirst/);
     let forcedActivation = false;
     let claimedClients = false;
+    const listeners = [];
     runInNewContext(worker, {
+      importScripts(path) { assert.equal(path, 'push-worker.js'); },
       define: (_dependencies, factory) => factory({
         precacheAndRoute() {},
         cleanupOutdatedCaches() {},
@@ -53,12 +57,16 @@ test('production build registers a scoped worker and precaches the app without t
         clientsClaim() { claimedClients = true; },
       }),
       self: {
-        addEventListener() {},
+        addEventListener(type, listener) { listeners.push([type, listener]); },
         skipWaiting() { forcedActivation = true; },
       },
     });
     assert.equal(forcedActivation, false, 'updates must wait for existing tabs to close');
     assert.equal(claimedClients, false, 'updates must not take over an open editor');
+    const onMessage = listeners.find(([type]) => type === 'message')?.[1];
+    assert.equal(typeof onMessage, 'function');
+    onMessage({ data: { type: 'SKIP_WAITING' } });
+    assert.equal(forcedActivation, true, 'the update button must be able to apply a waiting version');
   } finally {
     await rm(outDir, { recursive: true, force: true });
   }

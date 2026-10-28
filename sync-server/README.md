@@ -50,6 +50,8 @@ Missing or incorrect authorization returns 401. Unknown valid UUIDs return 404. 
 
 There is no public list, lookup by name, initialization or ledger deletion endpoint.
 
+Local groups have no product count limit. The browser permits one shared group in its guest workspace, counting both created groups and joined invitations. The anonymous `/groups` API has no persistent guest identity, so that browser limit is not a server-enforced per-person quota. Clearing browser data or using another browser creates a separate guest workspace.
+
 ## Private account directory
 
 All `/account/groups` requests use `Authorization: Bearer <Google ID token>`. The Worker validates it for every request and derives the directory namespace exclusively from the signed `sub`, not from request data. It strips this header before forwarding to the internal Durable Object. The directory stores private group capabilities and the selected member identity so another authenticated device can recover them. Group storage retains only each capability's hash; recoverable keys in the directory are protected by Google authentication and Cloudflare storage, not by end-to-end encryption.
@@ -63,9 +65,11 @@ All `/account/groups` requests use `Authorization: Bearer <Google ID token>`. Th
 
 Identity/removal conflicts return `409 account_conflict` with authoritative `{ entry, revision }`; `entry: null` means the reference was removed. Versions remain monotonic across removal and rejoin, fencing old deletion attempts. Account writes are serialized across storage and ledger awaits. An identical accepted operation can be retried without duplicating groups.
 
-Limits: 100 active/reserved groups, 1,000 lifetime operation records/tombstones, 1 MiB of directory state, 256 KiB + 1 KiB per streamed create/link request and 1 KiB per identity/removal request. Exhaustion returns `account_limit` rather than evicting tombstones and allowing stale resurrection. Increasing these limits requires a reviewed storage strategy; no automatic tombstone compaction is implemented.
+Each Google account permits six active/reserved shared groups, counting both created groups and joined invitations. Pending creates reserve capacity before ledger allocation, so concurrent requests cannot claim the same final slot. Removing an account reference frees its slot. Existing directories above six remain readable and editable; accepted retries and persisted create reservations remain recoverable, while new groups or invitations require capacity below six. Linking an already active group does not consume another slot.
 
-The client requests a bounded directory and fetches its ledgers with at most four concurrent reads. It replaces the cached account list only after full validated recovery, rejects stale revisions, pauses list replacement while forms are open, and aborts session-bound requests on logout/expiry. Guest and account caches are separate. Google credentials remain memory-only; there are no refresh tokens or persistent server sessions.
+Technical limits remain: 1,000 lifetime operation records/tombstones, 1 MiB of directory state, 256 KiB + 1 KiB per streamed create/link request and 1 KiB per identity/removal request. Exhaustion returns `account_limit` rather than evicting tombstones and allowing stale resurrection. Increasing these technical limits requires a reviewed storage strategy; no automatic tombstone compaction is implemented.
+
+The client requests a bounded directory and fetches its ledgers with at most four concurrent reads. It reconciles the cached shared account list only after full validated recovery, preserving browser-local groups and local edits made while reads are in flight, rejects stale revisions, pauses list replacement while forms are open, and aborts session-bound requests on logout/expiry. Guest and account caches are separate. Google credentials remain memory-only; there are no refresh tokens or persistent server sessions.
 ## Google configuration
 
 `cloudflare.config.ts` declares `GOOGLE_CLIENT_ID` as a public text binding using `src/google-config.js` from the parent app. The OAuth client secret and downloaded credential JSON are not needed by this popup/ID-token flow. Do not deploy them as static assets or commit them. `jose` is the Worker's JWT verification dependency; install this project's dependencies before running the root test suite as well.
@@ -89,10 +93,28 @@ Group details use `{ collection: 'details', before: { name, emoji, currency, des
 
 `applyChanges(current, changes)` returns an independent canonical group. It applies a change if the current entity equals `before`, accepts an already-matching `after` as an idempotent retry, and throws `SyncConflictError` (`code: 'conflict'`) otherwise. Object-key order is irrelevant; array order inside an entity is meaningful. Distinct new expenses from the same base both survive. Conflicting batches never partially persist. Invalid changes throw `SyncValidationError` (`code: 'invalid_changes'` or `'invalid_group'`). Each Durable Object serializes reads, authorization and writes across asynchronous operations.
 
-The service reuses the app's `validateState` for splits, cents, dates, references and unique IDs. Shared groups additionally allow at most 100 members, 2,000 expenses and 2,000 repayments; IDs are at most 128 characters, names 160, expense titles 240, emoji 32, and descriptions/notes 4,000. Both streamed request bodies and complete canonical groups are capped at 256 KiB. Currency cannot change when the current group has expense or repayment history, including a patch that deletes that history. Canonical storage strips all unrecognized group/member/expense/repayment fields.
+The service reuses the app's `validateState` for splits, cents, dates, references and unique IDs. There is no product count limit on expenses, repayments or changes in a batch. Shared groups allow at most 100 members; IDs are at most 128 characters, names 160, expense titles 240, emoji 32, and descriptions/notes 4,000. Streamed create/patch request bodies and complete canonical groups are capped at 256 KiB. These technical byte limits still bound the history that fits in a shared group, and a large replacement diff may exceed the request limit even when each individual group snapshot fits. Currency cannot change when the current group has expense or repayment history, including a patch that deletes that history. Canonical storage strips all unrecognized group/member/expense/repayment fields.
 
 Clients should poll the authenticated GET endpoint every three seconds while a shared group is active. Keep the bearer token in the URL fragment and local device metadata so the web host does not receive it. Anyone with the link can edit; sharing that link grants group access.
 
 ## Verification
 
 `npm test` exercises the real service over a small in-memory substitute for Cloudflare storage and namespace bindings: token hashing and access checks, strict CORS, streamed byte limits, durable recreation, concurrent patches, retries, safe failures, and atomic conflicts/validation. `npm run build` verifies the Worker and shared protocol bundle together.
+
+## Account approval registry and admin push
+
+`AccessRegistry` / `ACCESS` is a singleton SQLite Durable Object in addition to the existing `GroupLedger` / `GROUPS` and `AccountDirectory` / `ACCOUNTS`. Deploy it before the approval-aware frontend. Preserve all three namespaces during rollback; removing the access registry loses approval history and push keys. Missing or unavailable access storage fails closed with 503 for Google account access. Existing anonymous capability routes are unchanged. Pending users use those same guest routes with the browser limit of one shared group and unlimited local groups; approval gates account-directory synchronization and its six-group allowance.
+
+Google-signed verified email `raulhdz40@gmail.com` alone grants admin access. No role or email supplied in a request body can grant it. `GET /auth/me` adds `access: {status: "pending" | "approved" | "rejected", isAdmin: boolean}`. Non-owner identities not already in the registry enter pending, including existing accounts first seen after this deployment. Every account-directory route rechecks the durable decision; pending/rejected requests return 403 `account_pending` / `account_rejected` before accessing account data. The owner always remains approved.
+
+Authenticated owner APIs:
+
+- `GET /admin/accounts`: `{revision, accounts}`; rows contain verified identity, status, integer millisecond timestamps and version. Owner is excluded.
+- `PATCH /admin/accounts/:encodedSubject`: `{status: "approved" | "rejected", version}`; returns `{revision, account}`, or 409 `access_conflict` with the authoritative row. The owner cannot revoke themselves.
+- `GET /admin/push`: `{publicKey, subscriptions, endpoints}`; no private VAPID or subscription authentication keys are returned.
+- `POST /admin/push`: `{subscription}` saves a validated browser subscription. `DELETE /admin/push`: `{endpoint}` removes one.
+- `POST /admin/push/test`: sends a generic test notification; returns `{sent, expired}`.
+
+The registry serializes decisions and persistence, caps at 2,000 accounts, 2 MiB canonical state and ten notification devices, and does not evict account history. A request is committed before a single best-effort notification attempt; repeated sign-ins do not retry or duplicate alerts. Push delivery runs under Durable Object `waitUntil`, has a five-second network timeout, and prunes 404/410 endpoints through the mutation queue so background cleanup cannot rewind approvals. Failed push delivery does not block sign-in or lose the pending row. Manual test delivery is bounded too.
+
+VAPID P-256 keys are generated with WebCrypto once and kept in durable storage. Empty-body POSTs use RFC 8292 authentication and a five-minute TTL; the service worker displays fixed generic text. No applicant profile is transmitted to browser push providers. Subscription endpoints must use HTTPS and recognized browser push hosts; credentials, custom ports, fragments and redirects are rejected. Subscription P-256/auth keys are validated. This uses existing Cloudflare resources and no new dependency. Real notification delivery requires a user-granted browser permission and a published service worker; iOS/iPadOS users open the installed Home Screen app.

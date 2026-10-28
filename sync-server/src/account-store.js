@@ -3,7 +3,7 @@ import { errorResponse, hashToken, HttpError, json, readJson } from './service.j
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
-export const MAX_ACCOUNT_GROUPS = 100;
+export const MAX_ACCOUNT_GROUPS = 6;
 export const MAX_ACCOUNT_OPERATIONS = 1000;
 export const MAX_ACCOUNT_BYTES = 1024 * 1024;
 export const MAX_ACCOUNT_REQUEST_BYTES = MAX_GROUP_BYTES + 1024;
@@ -138,7 +138,7 @@ export class AccountStore {
       if (state.operations.length >= MAX_ACCOUNT_OPERATIONS) throw new HttpError(409, 'account_limit', 'La cuenta alcanzó el límite de registros.');
       if (create) {
         const reserved = state.rows.filter(row => row.active).length + state.operations.filter(item => item.pending).length;
-        if (reserved >= MAX_ACCOUNT_GROUPS) throw new HttpError(409, 'account_limit', 'La cuenta admite hasta 100 grupos.');
+        if (reserved >= MAX_ACCOUNT_GROUPS) throw new HttpError(409, 'account_limit', 'La cuenta admite hasta 6 grupos compartidos. Sal de uno para agregar otro.');
         const id = crypto.randomUUID();
         const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
         operation = { sourceId: payload.sourceId, id, fingerprint, pending: { token, group: canonicalizeGroup({ ...group, id }), selfId: payload.selfId } };
@@ -152,8 +152,10 @@ export class AccountStore {
     const envelope = await this.#ledger(id, token, operation?.pending?.group);
     validateSelf(payload.selfId, envelope.group);
     let row = state.rows.find(item => item.id === id);
-    if (!row?.active && state.rows.filter(item => item.active).length + state.operations.filter(item => item.pending && item !== operation).length >= MAX_ACCOUNT_GROUPS) {
-      throw new HttpError(409, 'account_limit', 'La cuenta admite hasta 100 grupos.');
+    // Persisted creates already reserved a slot. Let their retries finish even
+    // when an older directory predates the current account limit.
+    if (!row?.active && !operation?.pending && state.rows.filter(item => item.active).length + state.operations.filter(item => item.pending).length >= MAX_ACCOUNT_GROUPS) {
+      throw new HttpError(409, 'account_limit', 'La cuenta admite hasta 6 grupos compartidos. Sal de uno para agregar otro.');
     }
     const existing = row?.active;
     if (!existing) {
