@@ -21,6 +21,14 @@ npm run preview
 
 La versión estática se genera en `dist/`. Antes de proponer cambios, ejecuta las pruebas y la compilación.
 
+## Instalar como app (PWA)
+
+En Android o Chrome/Edge de escritorio, usa la opción **Instalar aplicación** del navegador. En iPhone/iPad, abre Splitcount en Safari y elige **Compartir → Añadir a pantalla de inicio**. Se abre como una app independiente con su propio icono.
+
+La versión de producción incluye un service worker que guarda la interfaz y sus recursos para abrirla sin conexión después de una primera visita conectada y de que termine la instalación del worker. Los grupos locales siguen permitiendo cambios sin conexión; los compartidos muestran su última copia y necesitan conexión para guardar. La API de grupos no se cachea en el service worker. La fuente de Google puede sustituirse por la fuente del sistema sin conexión.
+
+Las actualizaciones se preparan en segundo plano y se activan al cerrar todas las ventanas de Splitcount y volver a abrirla, sin forzar una recarga mientras editas. No borran `localStorage` ni los grupos. La PWA requiere HTTPS (o localhost); para probarla localmente usa `npm run build` y `npm run preview`, no el servidor de desarrollo.
+
 ## Cómo funciona
 
 - **Grupos** es el inicio: cada plan muestra integrantes, moneda y saldo personal. Cada saldo conserva su moneda; no se suman monedas diferentes. En un grupo compartido sin identidad elegida se pide seleccionar un nombre.
