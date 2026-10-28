@@ -47,7 +47,9 @@ El tema inicial es oscuro. Puedes elegir claro u oscuro en Ajustes o con el bot�
 
 ## Compatibilidad con datos existentes
 
-El nombre visible es Splitcount; antes se llamó Buenpar y Entre. Se conservan el repositorio, la URL pública, el formato de invitación y el servicio `entre-sync`. Las claves `entre-state-v1` y `entre-theme-v1` permanecen iguales para recuperar los grupos y la apariencia guardados. El historial del navegador conserva su propiedad interna `buenpar` para restaurar la pantalla y mantener el comportamiento de Atrás. Los respaldos válidos anteriores siguen siendo compatibles; el cambio de identidad no requiere migración del backend.
+El nombre visible es Splitcount; antes se llamó Buenpar y Entre. El repositorio es `raulmar0/splitcount` y la aplicación se publica en `/splitcount/`. Se conservan el formato de invitación y el servicio `entre-sync`. Las claves `entre-state-v1` y `entre-theme-v1` permanecen iguales para recuperar los grupos y la apariencia guardados en el mismo origen. El historial del navegador conserva su propiedad interna `buenpar` para restaurar la pantalla y mantener el comportamiento de Atrás. Los respaldos válidos anteriores siguen siendo compatibles; el cambio de identidad no requiere migración del backend.
+
+Las nuevas invitaciones usan la ruta `/splitcount/`. Para abrir una invitación anterior, cambia únicamente `/entre-app/` por `/splitcount/` y conserva completo el fragmento `#grupo=…`; su clave de acceso sigue siendo válida.
 
 ## Servicio de sincronización
 
@@ -59,8 +61,8 @@ El flujo [pages.yml](.github/workflows/pages.yml) instala con `npm ci`, ejecuta 
 
 Enlaces:
 
-- Repositorio: [raulmar0/entre-app](https://github.com/raulmar0/entre-app).
-- Aplicación: [raulmar0.github.io/entre-app](https://raulmar0.github.io/entre-app/).
+- Repositorio: [raulmar0/splitcount](https://github.com/raulmar0/splitcount).
+- Aplicación: [raulmar0.github.io/splitcount](https://raulmar0.github.io/splitcount/).
 
 ## Diseño y referencias
 
