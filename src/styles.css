@@ -1,4 +1,4 @@
-/* Buenpar starts on a phone: one column, reachable actions, native scrolling.
+/* Splitcount starts on a phone: one column, reachable actions, native scrolling.
    The only layout enhancements are tablet >= 720px and desktop >= 1100px. */
 :root {
   color-scheme: dark;
@@ -129,6 +129,7 @@ h3 { font-size: 16px; font-weight: 600; line-height: 1.5; }
 .mobile-brand, .brand { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: var(--text); font-weight: 800; letter-spacing: -.035em; text-decoration: none; line-height: 1; }
 .mobile-brand { font-size: 23px; }
 .brand-image { display: block; width: 32px; height: 32px; flex-shrink: 0; object-fit: contain; }
+:root[data-theme='light'] .brand-image { filter: brightness(.5) saturate(1.2); }
 .mobile-back { display: inline-flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 4px 8px 0; font-size: 14px; font-weight: 600; }
 .mobile-back svg { width: 20px; height: 20px; }
 .topbar-actions { display: flex; align-items: center; flex-shrink: 0; gap: 0; }

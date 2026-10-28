@@ -1,8 +1,8 @@
-# Buenpar design system
+# Splitcount design system
 
-Buenpar is a shared-expense ledger designed from the phone. The first screen answers “Which plan do I need?” with groups, members, currency and a personal balance for each plan. Inside a group, the personal balance, group total, expenses and suggested payments explain what should happen next. Each amount retains its group's currency.
+Splitcount is a shared-expense ledger designed from the phone. The first screen answers “Which plan do I need?” with groups, members, currency and a personal balance for each plan. Inside a group, the personal balance, group total, expenses and suggested payments explain what should happen next. Each amount retains its group's currency.
 
-The identity pairs an original ImageGen symbol with a live **Manrope** wordmark. Its linked mint forms suggest b/p and shared contributions; the transparent PNG is used in the header, desktop sidebar, favicon and app metadata. [Logo provenance and prompt](docs/brand/logo-prompt.md) identify the generated source and shipped asset.
+The identity pairs the selected ImageGen **Reparto** symbol with a live **Manrope** Splitcount wordmark. Three mint forms fit around a Y-shaped negative space, suggesting a shared expense divided into equal parts. The transparent PNG is used in the header, desktop sidebar, favicon and app metadata. [Logo provenance and prompts](docs/brand/splitcount-logo.md) identify the selected proposal, transparent refinement and shipped asset. [The earlier Buenpar logo record](docs/brand/logo-prompt.md) remains as history.
 
 The visual foundation continues the **True-black flat** direction, taste-skill seed **1298005779**. Warm near-black surfaces use lightness for elevation; mint controls and restrained status colours establish emphasis. The interface uses no photographic hero, slogans, emoji navigation, rainbow categories, gradients, glass, glows or page-load choreography.
 
@@ -27,7 +27,7 @@ The chart's leading segment uses the accent; remaining segments use neutral valu
 
 ## Phone layout and navigation
 
-The base stylesheet targets 320–430px phones with 16px page gutters. A compact sticky header holds Buenpar, Back within a group, and the theme control. Persistent bottom navigation offers **Grupos, Gasto, Actividad and Ajustes**, with a prominent Gasto action. Content and navigation account for the bottom safe area.
+The base stylesheet targets 320–430px phones with 16px page gutters. A compact sticky header holds Splitcount, Back within a group, and the theme control. Persistent bottom navigation offers **Grupos, Gasto, Actividad and Ajustes**, with a prominent Gasto action. Content and navigation account for the bottom safe area.
 
 Grupos uses a single column of plan cards with members, currency, local/shared status and personal balance. It does not aggregate balances across currencies. Group detail shows the title and sharing action, a compact member strip, then personal balance and group total. Below 360px those figures stack to keep whole amounts readable; from 360px they share a divided two-column band. The per-person average is reserved for desktop.
 
@@ -53,10 +53,10 @@ Panels use 10px corners and controls use 6px corners. Circles identify people. R
 
 Dark is the default, including before React loads. A valid preference persists as `entre-theme-v1`; missing or blocked storage safely returns dark. Ajustes and the header theme button update the same preference. Dialogs, forms, native inputs, focus rings, selections and placeholders inherit the active theme.
 
-Navigation stores the screen and selected group in browser history. Back closes an open overlay while preserving its group, then follows screen history. Pending writes keep their dialog open. Reload restores a valid saved history route; removed groups resolve to Grupos. Invitations retain unrelated cached groups.
+Navigation stores the screen and selected group in browser history. The internal `buenpar` property stays compatible across the rename, as do `entre-state-v1` and `entre-theme-v1` in browser storage. Back closes an open overlay while preserving its group, then follows screen history. Pending writes keep their dialog open. Reload restores a valid saved history route; removed groups resolve to Grupos. Invitations retain unrelated cached groups.
 
 Expense drafts and payment forms retain their original group context. Shared writes wait for server confirmation; failures preserve draft values and expose recovery. Sync errors appear with the group, and local-storage failures offer backup. Shared identities are local display preferences; the invitation link grants edit access. Controls have hover, focus, active and disabled treatments. Reduced-motion preferences remove transitions.
 
-Browser rendering and interaction verification are part of the integration review. This design record alone is not evidence that a screenshot, keyboard check or visual test passed. The current scope is recorded in [the Buenpar mobile design](docs/superpowers/specs/2026-10-27-buenpar-mobile-design.md).
+Browser rendering and interaction verification are part of the integration review. This design record alone is not evidence that a screenshot, keyboard check or visual test passed. The phone flows were established in [the mobile design under the earlier Buenpar name](docs/superpowers/specs/2026-10-27-buenpar-mobile-design.md); that specification retains its original name and context. The current identity is Splitcount with the selected Reparto symbol.
 
 Integration review on 2026-10-27 covered browser widths of 320, 360, 390, 768 and 1440px, navigation, full-screen dialogs, exact splits, payments and persisted theme choice. A shared test group was opened in a second browser session, Ana was selected as the local identity, and a new expense of 90 appeared automatically in the first session with its balance updated. The full 144-test suite, production build and whitespace check passed. Physical-device software-keyboard behaviour remains a separate check.

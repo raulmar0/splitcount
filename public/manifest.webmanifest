@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "Buenpar — gastos entre amigos",
-  "short_name": "Buenpar",
+  "name": "Splitcount — gastos entre amigos",
+  "short_name": "Splitcount",
   "description": "Reparte gastos y sincroniza las cuentas con tus amigos.",
   "lang": "es",
   "start_url": "./",
@@ -9,5 +9,5 @@
   "display": "standalone",
   "background_color": "#10100f",
   "theme_color": "#10100f",
-  "icons": [{ "src": "brand/buenpar-symbol.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any" }]
+  "icons": [{ "src": "brand/splitcount-symbol.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any" }]
 }

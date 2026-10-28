@@ -1,6 +1,6 @@
-# Buenpar
+# Splitcount
 
-Buenpar is a Spanish-language app for splitting expenses among friends, households and travel groups. People create a group, name its members, record who paid, divide an expense equally or by exact amounts, review balances and register payments made outside the app. Buenpar tracks the ledger; it does not transfer money.
+Splitcount is a Spanish-language app for splitting expenses among friends, households and travel groups. People create a group, name its members, record who paid, divide an expense equally or by exact amounts, review balances and register payments made outside the app. Splitcount tracks the ledger; it does not transfer money.
 
 ## Phone-first tasks
 
@@ -27,9 +27,9 @@ The member identity chosen on a device is a local preference, not authentication
 ## Constraints and commitments
 
 - Preserve expense arithmetic in integer cents, equal and exact splits, payment history, member names, export and restore behaviour. Label currencies and keep them separate.
-- Use the original ImageGen Buenpar symbol with a live Manrope wordmark. Default to dark and offer a persisted light theme in Ajustes and the header.
+- Use the selected ImageGen **Reparto** symbol: three mint forms separated by a Y-shaped space, with a live Manrope Splitcount wordmark. Default to dark and offer a persisted light theme in Ajustes and the header.
 - Build the base layout for 320–430px phones, with touch targets of at least 44px and safe-area spacing. Stack summary amounts below 360px, then use two columns. Enhance at 720px for tablet and 1100px for the desktop sidebar and transfer column; 1440px adds a third group-card column.
 - Use task-focused copy, an object title, neutral surfaces and restrained green controls and status. Keep financial data readable without decorative photography, slogan headers, emoji navigation or rainbow categories.
-- Preserve existing data and invitations: `entre-state-v1`, `entre-theme-v1`, the public `/entre-app/` URL and `entre-sync` remain compatible. New export filenames use Buenpar.
+- Preserve existing data and invitations: `entre-state-v1`, `entre-theme-v1`, the browser history property `buenpar`, the public `/entre-app/` URL and `entre-sync` remain compatible. New export filenames use Splitcount. Earlier Buenpar and Entre backups remain valid.
 
 Success means a person can enter an expense from their phone, share its group, identify themselves locally and understand what is owed without learning a custom interaction pattern.
