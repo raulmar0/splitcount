@@ -8,6 +8,7 @@ Necesitas Node.js 24 y npm.
 
 ```sh
 npm install
+npm ci --prefix sync-server
 npm run dev
 ```
 
@@ -45,13 +46,22 @@ Atrás cierra primero el formulario o filtro abierto y conserva el grupo de orig
 
 Pulsa **Compartir**, escribe tu nombre y crea el enlace del grupo. Quien lo abra conserva sus otros grupos, entra al grupo invitado y elige su integrante (o añade su nombre) para ver su propio saldo. El grupo activo consulta gastos, pagos, integrantes y detalles cada tres segundos, además de al volver a la ventana o recuperar conexión. Las altas simultáneas se combinan; si dos personas editan el mismo movimiento, Splitcount avisa del conflicto sin reemplazar silenciosamente la otra edición.
 
-**Cualquier persona que tenga el enlace puede ver y editar ese grupo.** La clave está en el fragmento de la URL y se envía a la API en `Authorization`; el servidor almacena solo su hash. No hay cuentas ni un directorio de grupos. Salir de un grupo lo quita de ese dispositivo y conserva el acceso de los demás.
+**Cualquier persona que tenga el enlace puede ver y editar ese grupo.** La clave está en el fragmento de la URL y se envía a la API en `Authorization`; el servidor almacena solo su hash. El acceso con Google no cambia este permiso y no hay un directorio de grupos. Salir de un grupo lo quita de ese dispositivo y conserva el acceso de los demás.
 
 Los grupos compartidos se guardan en un servicio persistente de Cloudflare con un Durable Object SQLite por grupo. Los grupos locales permanecen en `localStorage`; solo se suben cuando activas Compartir. Los tres grupos iniciales son ejemplos. Sin conexión puedes consultar la última copia; para guardar cambios compartidos se necesita conexión. Si falla una escritura, el formulario conserva el borrador y muestra el error.
 
 En **Ajustes → Tus datos**, exporta una copia JSON para respaldar o trasladar todos tus datos. **Incluye las claves de los grupos compartidos: guárdala como una copia privada.** La importación se valida antes de reemplazar la copia local. El CSV exporta gastos del grupo para análisis y no reemplaza al respaldo JSON. Las nuevas descargas usan nombres `splitcount-respaldo.json` y `splitcount-<grupo>.csv`.
 
 El tema inicial es oscuro. Puedes elegir claro u oscuro en Ajustes o con el botón de sol/luna de la barra superior. La preferencia se guarda en este navegador y se aplica antes de cargar React.
+## Acceso opcional con Google
+
+En **Ajustes → Cuenta**, el botón oficial de Google permite verificar tu identidad. Puedes seguir usando todos los grupos sin iniciar sesión. La cuenta de Google no se asigna automáticamente a un integrante del grupo ni restringe los enlaces compartidos.
+
+Esta primera integración **no guarda ni recupera grupos por cuenta**. El perfil verificado permanece solo en memoria; recargar la app o vencer el ID token requiere volver a iniciar sesión. Cerrar sesión no borra los grupos ni cierra tu sesión general de Google. No se guardan credenciales en `localStorage`, `sessionStorage` ni respaldos.
+
+El Client ID público está en `src/google-config.js`; Cloudflare recibe el mismo valor mediante el binding `GOOGLE_CLIENT_ID`. El flujo usa Google Identity Services con popup y callback, sin secreto OAuth ni URI de redirección. **No copies el JSON de credenciales al repositorio ni al frontend.**
+
+El proyecto de Google Cloud es `splitcount-raulmar`. El cliente **Splitcount Web** autoriza `https://raulmar0.github.io`, `http://localhost`, `http://localhost:5173` y `http://127.0.0.1:5173`. Los orígenes no incluyen rutas como `/splitcount/`; otros puertos de desarrollo requieren agregarlos al cliente OAuth. Google Auth Platform está en modo de prueba con `raulhdz40@gmail.com` como usuario de prueba; para otras cuentas, revisa Público en la consola antes de distribuir el acceso.
 
 ## Compatibilidad con datos existentes
 

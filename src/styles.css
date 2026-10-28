@@ -101,6 +101,13 @@ h2 { font-size: 20px; font-weight: 600; line-height: 1.35; letter-spacing: -.02e
 h3 { font-size: 16px; font-weight: 600; line-height: 1.5; }
 ::selection { background: var(--selection); color: var(--selection-ink); }
 .muted { color: var(--muted); }
+.google-signin { margin-top: 16px; min-height: 44px; }
+.google-signin > p { color: var(--muted); padding: 10px 0; }
+.google-account .form-error { margin: 12px 0; }
+.account-profile { display: flex; align-items: center; gap: 12px; margin: 16px 0 12px; }
+.account-profile > div { display: grid; min-width: 0; overflow-wrap: anywhere; }
+.account-profile span:not(.avatar) { color: var(--muted); }
+.account-verified { display: flex; align-items: center; gap: 8px; color: var(--positive); margin-bottom: 16px; }
 .positive { color: var(--positive); }
 .negative { color: var(--text); }
 .danger { color: var(--negative) !important; }

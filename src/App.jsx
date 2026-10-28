@@ -10,6 +10,7 @@ import { HomeScreen, ActivityScreen, SettingsScreen, TransferList } from './Scre
 import { ShareDialog, IdentityDialog, JoinDialog } from './Sharing.jsx';
 import { loadTheme, saveTheme } from './themes.js';
 import useGroupSync from './useGroupSync.js';
+import useGoogleAuth from './useGoogleAuth.js';
 
 const CATEGORIES = {
   food: { name: 'Comida y bebida', icon: Utensils, color: 'peach' },
@@ -113,6 +114,7 @@ function EmptyState({ onAdd, filtered }) {
 }
 
 export default function App() {
+  const auth = useGoogleAuth();
   const [state, setState] = useState(() => loadState() || createInitialState());
   const [theme, setTheme] = useState(() => loadTheme());
   const [tab, setTab] = useState('expenses');
@@ -184,7 +186,7 @@ export default function App() {
       <header className="topbar"><div className="topbar-start">{screen === 'group' && <button className="icon-button mobile-back" aria-label="Volver" onClick={goBack}><ArrowLeft size={22} /></button>}<button className="mobile-brand" aria-label="Splitcount, ir a grupos" onClick={() => navigate('groups')}><img className="brand-image" src={`${import.meta.env.BASE_URL}brand/splitcount-symbol.png`} alt="" width="32" height="32" /><span>Splitcount</span></button><div className="breadcrumb desktop-only"><span>{screen === 'group' ? 'Tus grupos' : screen === 'groups' ? 'Tus grupos' : screen === 'activity' ? 'Actividad' : 'Ajustes'}</span>{screen === 'group' && group && <><ChevronRight size={15} /><strong>{group.name}</strong></>}</div></div><div className="topbar-actions">{screen === 'group' && <span className={`sync-status ${syncStatus === 'offline' || syncStatus === 'error' ? 'error' : syncStatus === 'pending' ? 'pending' : ''}`}><span />{syncLabel}</span>}<button className="theme-toggle icon-button" aria-label={theme === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'} title={theme === 'dark' ? 'Tema claro' : 'Tema oscuro'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button><button className="icon-button desktop-only" onClick={() => navigate('settings')} aria-label="Respaldos y ajustes"><Settings2 size={19} /></button></div></header>
       <main>
         {storageError && <div className="storage-warning" role="alert">No se pudieron guardar los cambios en este navegador. Descarga un respaldo antes de salir.<button onClick={exportJSON}>Descargar respaldo</button></div>}
-        {screen === 'groups' ? <HomeScreen groups={state.groups} onOpen={selectGroup} onCreate={() => setModal({type:'group'})} /> : screen === 'activity' ? <ActivityScreen groups={state.groups} onOpen={(selected,item) => {selectGroup(selected.id);if(item.kind === 'payment')setTab('balances');else setModal({type:'detail',expense:item,baseGroup:selected});}} /> : screen === 'settings' ? <SettingsScreen theme={theme} onTheme={setTheme} onExport={exportJSON} onImport={() => importRef.current.click()} onHelp={() => setModal({type:'help'})} /> : group ? <>
+        {screen === 'groups' ? <HomeScreen groups={state.groups} onOpen={selectGroup} onCreate={() => setModal({type:'group'})} /> : screen === 'activity' ? <ActivityScreen groups={state.groups} onOpen={(selected,item) => {selectGroup(selected.id);if(item.kind === 'payment')setTab('balances');else setModal({type:'detail',expense:item,baseGroup:selected});}} /> : screen === 'settings' ? <SettingsScreen theme={theme} onTheme={setTheme} onExport={exportJSON} onImport={() => importRef.current.click()} onHelp={() => setModal({type:'help'})} auth={auth} /> : group ? <>
           <div className="page-intro"><div><h1>{group.name}</h1><p className="group-subtitle">{group.description || 'Gastos compartidos entre amigos.'}</p></div><div className="group-title-actions"><button className="button secondary share-button" onClick={() => setModal({ type: 'share' })}><Share2 size={17} /><span>Compartir</span></button><button className="button primary add-top" onClick={addExpense}><Plus size={18} /><span>Añadir gasto</span></button></div></div>
           {group._shared && (syncStatus === 'offline' || syncStatus === 'error') && <div className="sync-error-banner" role="status"><CloudOff size={17} /><span>{syncError || 'Mostrando la última copia del grupo.'}</span><button onClick={retrySync}>Reintentar</button></div>}
           <section className="group-cover" aria-label={`Integrantes de ${group.name}`}>

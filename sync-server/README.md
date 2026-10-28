@@ -1,6 +1,6 @@
 # Entre shared groups
 
-This isolated Cloudflare Worker keeps one SQLite-backed Durable Object per shared group. The React app remains static on GitHub Pages. The Worker has no accounts or public group directory: possession of the secret link permits reading and editing that group.
+This Cloudflare Worker keeps one SQLite-backed Durable Object per shared group. The React app remains static on GitHub Pages. Optional Google identity verification is separate from group access: possession of the secret link permits reading and editing that group. There is no stored account profile or public group directory.
 
 ## Local development
 
@@ -39,6 +39,7 @@ Official configuration documentation: <https://developers.cloudflare.com/cf/proj
 Every response is JSON, except empty OPTIONS responses, and sends `Cache-Control: no-store`. A browser origin must be exactly `https://raulmar0.github.io`, or HTTP/HTTPS localhost or `127.0.0.1` with an optional port. Requests without an Origin header are accepted with the same authorization rules. Allowed CORS headers are Content-Type and Authorization; supported methods are GET, POST, PATCH and OPTIONS.
 
 - `GET /health`: `{ "service": "entre-sync", "version": "1.0.0" }`.
+- `GET /auth/me`, `Authorization: Bearer <Google ID token>`: verifies Google's RS256 signature with cached, rotating public JWKS, issuer, the configured client audience, issue time, expiry, stable subject and verified email. Returns `{ "user": { "id": sub, "name": name, "email": email }, "expiresAt": milliseconds }`. Invalid credentials return 401; missing configuration or unavailable Google verification returns 503. This route does not allocate group storage, persist tokens or issue session cookies.
 - `POST /groups`, JSON `{ "group": group }`: creates a new UUID identity and returns HTTP 201 `{ "group": canonicalGroup, "revision": 1, "token": secret }`. Local group IDs are replaced. The random secret is 32 bytes encoded as 43 base64url characters. Only its SHA-256 hash is persisted.
 - `GET /groups/:uuid`, `Authorization: Bearer <secret>`: returns `{ "group": group, "revision": number }`.
 - `PATCH /groups/:uuid`, same authorization, JSON `{ "changes": [...] }`: atomically validates, merges and persists changes; returns `{ "group": group, "revision": number }`. Each accepted patch increments the revision, including safe retries.
@@ -46,6 +47,11 @@ Every response is JSON, except empty OPTIONS responses, and sends `Cache-Control
 Missing or incorrect authorization returns 401. Unknown valid UUIDs return 404. A conflict returns HTTP 409 `{ "error": "conflict", "message": "…", "group": latestGroup, "revision": latestRevision }`. Validation returns 400, oversized requests 413, unsupported content types 415, and disallowed browser origins 403. Other errors use `{ "error": code, "message": safeMessage }`; internal errors reveal no storage details.
 
 There is no list, lookup by name, public initialization or deletion endpoint.
+## Google configuration
+
+`cloudflare.config.ts` declares `GOOGLE_CLIENT_ID` as a public text binding using `src/google-config.js` from the parent app. The OAuth client secret and downloaded credential JSON are not needed by this popup/ID-token flow. Do not deploy them as static assets or commit them. `jose` is the Worker's JWT verification dependency; install this project's dependencies before running the root test suite as well.
+
+The browser sends the credential in an explicit Authorization header with cookies omitted. Existing origin validation and preflight rules apply to `/auth/me`; profiles and errors use `Cache-Control: no-store`. Google identity tokens cannot replace the invitation capability on `/groups/:uuid`. Account-to-group recovery and member authorization are not implemented.
 
 ## Changes and concurrency
 

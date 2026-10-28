@@ -1,4 +1,5 @@
 import { applyChanges, canonicalizeGroup, MAX_GROUP_BYTES, SyncConflictError, SyncValidationError } from '../../src/sync-protocol.js';
+import { authenticateGoogleRequest, GoogleAuthError } from './google-auth.js';
 
 const VERSION = '1.0.0';
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
@@ -14,7 +15,7 @@ function json(data, status = 200) {
 }
 
 function errorResponse(error) {
-  if (error instanceof HttpError) return json({ error: error.code, message: error.message }, error.status);
+  if (error instanceof HttpError || error instanceof GoogleAuthError) return json({ error: error.code, message: error.message }, error.status);
   if (error instanceof SyncValidationError) return json({ error: error.code, message: error.message }, 400);
   return json({ error: 'internal_error', message: 'No se pudo completar la solicitud.' }, 500);
 }
@@ -138,6 +139,7 @@ export async function handleRequest(request, env) {
     if (request.method === 'OPTIONS') return withCors(new Response(null, { status: 204 }), origin);
     const path = new URL(request.url).pathname;
     if (request.method === 'GET' && path === '/health') return withCors(json({ service: 'entre-sync', version: VERSION }), origin);
+    if (request.method === 'GET' && path === '/auth/me') return withCors(json(await authenticateGoogleRequest(request, env.GOOGLE_CLIENT_ID)), origin);
     if (request.method === 'POST' && path === '/groups') {
       const payload = await readJson(request);
       if (!payload?.group || typeof payload.group !== 'object' || Array.isArray(payload.group)) throw new SyncValidationError();

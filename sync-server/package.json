@@ -9,12 +9,15 @@
   "scripts": {
     "dev": "cf dev",
     "build": "cf build",
-    "test": "node --test ../tests/sync-protocol.test.js ../tests/sync-server.test.js",
+    "test": "node --test ../tests/sync-protocol.test.js ../tests/sync-server.test.js ../tests/google-auth-server.test.js",
     "deploy": "cf deploy"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "2.0.0-beta.v.6",
     "cf": "1.0.0-beta.24",
     "vite": "^8.3.5"
+  },
+  "dependencies": {
+    "jose": "^6.2.13"
   }
 }
