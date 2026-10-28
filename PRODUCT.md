@@ -8,7 +8,7 @@ The main job is recording an expense while keeping the group’s total and each 
 
 Local groups persist in the current browser and can be backed up or restored with JSON. Expenses can be exported as CSV. Seeded groups are examples and remain identified as examples.
 
-A group can be shared through a link. **Anyone with the link can view and edit the shared group.** The share dialog states that access model before the link is created or copied. Shared changes synchronize through a Cloudflare service alongside the app hosted on Cloudflare Pages. Sync states distinguish saved data, pending work and recoverable errors.
+A group can be shared through a link. **Anyone with the link can view and edit the shared group.** The share dialog states that access model before the link is created or copied. Shared changes synchronize through a Cloudflare service alongside the app hosted on GitHub Pages. Sync states distinguish saved data, pending work and recoverable errors.
 
 The member identity chosen on a device is a local preference, not authentication. Choosing a member changes whose balance is shown and the defaults for recording expenses; it does not provide an account or restrict the shared link’s edit rights. Shared-link access and member identity must stay distinct in interface copy.
 
