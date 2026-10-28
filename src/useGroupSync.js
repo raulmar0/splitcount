@@ -4,6 +4,7 @@ import {
   fetchSharedGroup, isSharedMetadata, parseInvite,
 } from './sync.js';
 import { canonicalizeGroup } from './sync-protocol.js';
+import { validateState } from './domain.js';
 
 const INVALID_SHARING = 'Este grupo tiene datos de sincronización inválidos. Conservamos tu copia local.';
 const OFFLINE = 'Sin conexión. Conservamos la última copia del grupo.';
@@ -174,6 +175,9 @@ export default function useGroupSync({ state, setState, onJoined }) {
     if (!baseline) throw new SyncError('Este grupo ya no está disponible.');
     if (pendingSet.current.has(baseline.id)) throw new SyncError('Espera a que termine de guardarse el cambio anterior.');
     if (!hasSharing(baseline)) {
+      if (after.id !== baseline.id || !validateState({ version: 1, activeGroupId: after.id, groups: [after] })) {
+        throw new SyncError('El cambio no es válido para este grupo. Comprueba los integrantes y vuelve a intentarlo.', 'invalid_group');
+      }
       setState(previous => ({ ...previous, groups: previous.groups.map(group => group.id === baseline.id ? after : group) }));
       return after;
     }

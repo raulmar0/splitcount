@@ -87,6 +87,15 @@ test('local saves update one cached group and retain other groups', async () => 
   await app.close();
 });
 
+test('invalid local payment references reject without changing the cache', async () => {
+  const app = await mount([local()]);
+  const before = latest.state.groups[0];
+  const invalid = { ...before, settlements: [{ id: 'wrong-group', from: 'you', to: 'not-a-member', amount: 1000, date: '2026-10-27' }] };
+  await act(async () => assert.rejects(latest.saveGroup(invalid, before), /válid|integrante|grupo/));
+  assert.deepEqual(latest.state.groups[0], before);
+  await app.close();
+});
+
 test('shared saves wait for server acceptance and preserve current viewer identity', async () => {
   globalThis.fetch = async () => response(envelope(shared()));
   const app = await mount([shared()]);

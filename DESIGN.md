@@ -1,12 +1,14 @@
-# Entre design system
+# Buenpar design system
 
-Entre is a working expense ledger. Its first question is “What is my balance in this group, and what should happen next?” The selected group, personal balance, recent expenses and suggested payments answer it in that order. Adding an expense and sharing the group remain visible in the title row.
+Buenpar is a shared-expense ledger designed from the phone. The first screen answers “Which plan do I need?” with groups, members, currency and a personal balance for each plan. Inside a group, the personal balance, group total, expenses and suggested payments explain what should happen next. Each amount retains its group's currency.
 
-The replacement visual direction is **True-black flat**, taste-skill seed **1298005779**. It uses lightness alone for elevation and keeps colour on data and status. Its face comes from Entre’s existing Manrope wordmark and shared-group identity, a warm near-black ground, and the recognizable sequence of people and suggested payments. The design uses no photographic hero, slogans, emoji navigation, decorative cards, gradients, glass, glows or page-load choreography.
+The identity pairs an original ImageGen symbol with a live **Manrope** wordmark. Its linked mint forms suggest b/p and shared contributions; the transparent PNG is used in the header, desktop sidebar, favicon and app metadata. [Logo provenance and prompt](docs/brand/logo-prompt.md) identify the generated source and shipped asset.
+
+The visual foundation continues the **True-black flat** direction, taste-skill seed **1298005779**. Warm near-black surfaces use lightness for elevation; mint controls and restrained status colours establish emphasis. The interface uses no photographic hero, slogans, emoji navigation, rainbow categories, gradients, glass, glows or page-load choreography.
 
 ## Tokens
 
-The source of truth is `src/styles.css`. Every interface colour is a semantic custom property; the light theme overrides those properties through `:root[data-theme='light']`.
+The source of truth is `src/styles.css`. Interface colours use semantic custom properties; the light theme overrides them through `:root[data-theme='light']`.
 
 | Role | Dark default | Light option |
 | --- | --- | --- |
@@ -16,28 +18,45 @@ The source of truth is `src/styles.css`. Every interface colour is a semantic cu
 | Text | `#f1f0eb` | `#252521` |
 | Secondary text | `#b5b5ac` | `#57574f` |
 | Metadata and placeholders | `#96968d` | `#64645b` |
-| Primary control | `#e8e7e0` | `#292925` |
-| Data and positive status | `#9db991` | `#4e7044` |
+| Primary control / accent | `#b4d9c8` | `#315f4e` |
+| Primary control text | `#14251d` | `#ffffff` |
+| Positive status | `#9db991` | `#4e7044` |
 | Destructive/error text | `#e6a29d` | `#a4433c` |
 
-The chart’s leading segment uses the data hue; all remaining segments use neutral values. Category icons are plain, unboxed outlines. Debt amounts retain a visible sign and use normal text rather than repeated warning colour. Error messages use an explicit semantic pair.
+The chart's leading segment uses the accent; remaining segments use neutral values. Category icons are plain outlines. Debt amounts retain a visible sign and use normal text rather than repeated warning colour. Error messages use an explicit semantic pair.
 
-## Type and layout
+## Phone layout and navigation
 
-One loaded family, **Manrope**, carries the interface. The scale is 12px metadata, 14px body and labels, 16px section titles, 24px page titles and secondary money, and 32px personal balance. Money and changing counts use tabular figures. Text uses sentence case and normal tracking, except a slight negative tracking on titles and money.
+The base stylesheet targets 320–430px phones with 16px page gutters. A compact sticky header holds Buenpar, Back within a group, and the theme control. Persistent bottom navigation offers **Grupos, Gasto, Actividad and Ajustes**, with a prominent Gasto action. Content and navigation account for the bottom safe area.
 
-The labeled 232px sidebar remains because the app contains multiple named groups plus activity, help and local data tools. A rail or the dealt “no sidebar” shell would hide the names users need to distinguish their plans. At 1000px and below it folds into the menu opened from the top bar. The page has equal 32px desktop gutters, 24px tablet gutters and 16px phone gutters.
+Grupos uses a single column of plan cards with members, currency, local/shared status and personal balance. It does not aggregate balances across currencies. Group detail shows the title and sharing action, a compact member strip, then personal balance and group total. Below 360px those figures stack to keep whole amounts readable; from 360px they share a divided two-column band. The per-person average is reserved for desktop.
 
-At 1440px: `232 sidebar + 32 margin + 820 main list + 24 gap + 300 payment rail + 32 margin = 1440`. Main sections align to the same outer edges. The selected group’s members, currency and sync state sit in a compact metadata strip. Three money figures share one divided band. On phones, personal balance and group total share two columns; the per-person average is omitted before the expense list and payment panel.
+The main panel has **Gastos, Saldos and Resumen** tabs. Gastos keeps search visible and opens filtering and ordering in a separate full-screen dialog. Saldos contains suggested transfers, member balances and payment history. Actividad is a separate screen spanning all groups. Ajustes contains appearance, backup, import and help.
 
-Panels use 10px corners and controls use 6px corners throughout. These deliberately adapt the dealt 20px/pill defaults to the existing ledger’s compact forms and familiar dialog controls; shape does not compete with monetary data. Circles are reserved for people. There are no resting shadows; dropdowns, dialogs and notices that float use one soft shadow token.
+Expense entry has two steps: **El gasto** for amount, description and payer; **El reparto** for participants and equal or exact amounts. Date, category and note are progressively revealed under Más detalles. Validation identifies and focuses the relevant field. Exact splits display the remaining amount and allow zero shares when the total still matches.
+
+## Progressive enhancements
+
+At **720px**, page gutters become 24px, Grupos gains two columns, more metadata and expense icons appear, and dialogs become bounded with a maximum width of 560px. Phone-style bottom navigation remains.
+
+At **1100px**, a labeled 232px sidebar and a 300px transfer column appear. The bottom navigation gives way to the sidebar; the title row adds the expense action. Desktop uses 32px gutters, visible category and ordering controls, three summary figures and the full expense list. At **1440px**, Grupos expands to three card columns.
+
+Forms use native modal dialogs. On phones they occupy the viewport; the dialog itself scrolls, its header remains sticky, and the expense flow has a sticky action footer with safe-area spacing. Controls use at least 44px touch targets, and text fields use 16px input text. These patterns require real-device keyboard and viewport checks as part of visual verification.
+
+## Type and shape
+
+Manrope carries the interface. The base scale is 12px metadata, 14px body and labels, 16px section titles and form inputs, 24px page titles and secondary money, and 28px personal balance on phones. Personal balance grows to 32px from tablet width; the expense amount input uses 40px. Money and changing counts use tabular figures. Text uses sentence case with slight negative tracking on titles and money.
+
+Panels use 10px corners and controls use 6px corners. Circles identify people. Resting panels have no shadows; dropdowns, dialogs and notices use one soft floating-shadow token.
 
 ## Behaviour and states
 
-Dark is the default, including before React loads. A valid explicit preference is stored as `entre-theme-v1`; blocked or missing storage safely returns dark. A theme button in the header changes the preference. All dialogs, forms, native inputs, focus rings, selections and placeholders inherit the active theme.
+Dark is the default, including before React loads. A valid preference persists as `entre-theme-v1`; missing or blocked storage safely returns dark. Ajustes and the header theme button update the same preference. Dialogs, forms, native inputs, focus rings, selections and placeholders inherit the active theme.
 
-Controls have readable hover, focus, active and disabled treatments. Pending shared writes retain the form’s context. Sync errors provide recovery copy beside the group; local storage failures retain the backup action. Mobile controls have a minimum 44px target. Reduced-motion preferences remove transitions; the app uses no decorative animation.
+Navigation stores the screen and selected group in browser history. Back closes an open overlay while preserving its group, then follows screen history. Pending writes keep their dialog open. Reload restores a valid saved history route; removed groups resolve to Grupos. Invitations retain unrelated cached groups.
 
-Browser rendering and interaction verification are part of the root integration review. Do not treat this design record alone as evidence that a screenshot or automated visual check passed.
+Expense drafts and payment forms retain their original group context. Shared writes wait for server confirmation; failures preserve draft values and expose recovery. Sync errors appear with the group, and local-storage failures offer backup. Shared identities are local display preferences; the invitation link grants edit access. Controls have hover, focus, active and disabled treatments. Reduced-motion preferences remove transitions.
 
-Phone refinement: balance and group total form a compact two-column band; per-person average is omitted below 580px. Group identity stays on one 64px row so the expense list appears earlier without shrinking text.
+Browser rendering and interaction verification are part of the integration review. This design record alone is not evidence that a screenshot, keyboard check or visual test passed. The current scope is recorded in [the Buenpar mobile design](docs/superpowers/specs/2026-10-27-buenpar-mobile-design.md).
+
+Integration review on 2026-10-27 covered browser widths of 320, 360, 390, 768 and 1440px, navigation, full-screen dialogs, exact splits, payments and persisted theme choice. A shared test group was opened in a second browser session, Ana was selected as the local identity, and a new expense of 90 appeared automatically in the first session with its balance updated. The full 144-test suite, production build and whitespace check passed. Physical-device software-keyboard behaviour remains a separate check.
