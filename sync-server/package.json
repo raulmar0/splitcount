@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "cf dev",
     "build": "cf build",
-    "test": "node --test ../tests/sync-protocol.test.js ../tests/sync-server.test.js ../tests/google-auth-server.test.js",
+    "test": "node --test ../tests/sync-protocol.test.js ../tests/sync-server.test.js ../tests/google-auth-server.test.js ../tests/account-server.test.js",
     "deploy": "cf deploy"
   },
   "devDependencies": {

@@ -6,7 +6,10 @@ const worker = defineWorker({
   name: 'entre-sync',
   compatibilityDate: '2026-10-27',
   entrypoint,
-  exports: { GroupLedger: exports.durableObject({ storage: 'sqlite' }) },
+  exports: {
+    GroupLedger: exports.durableObject({ storage: 'sqlite' }),
+    AccountDirectory: exports.durableObject({ storage: 'sqlite' }),
+  },
 });
 
 export default defineConfig({
@@ -15,6 +18,7 @@ export default defineConfig({
     ...worker,
     env: {
       GROUPS: bindings.durableObject({ worker, exportName: 'GroupLedger' as const }),
+      ACCOUNTS: bindings.durableObject({ worker, exportName: 'AccountDirectory' as const }),
       GOOGLE_CLIENT_ID: bindings.text(GOOGLE_CLIENT_ID),
     },
   },

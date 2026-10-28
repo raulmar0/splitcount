@@ -1,39 +1,87 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GOOGLE_CLIENT_ID } from './google-config.js';
 import { verifyGoogleCredential } from './google-auth.js';
+import { accountRequest } from './account-sync.js';
+import { clearAccountCache } from './workspace-storage.js';
+import { SyncError } from './sync.js';
 
 export default function useGoogleAuth() {
   const [session, setSession] = useState(null);
+  const [account, setAccount] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const sequence = useRef(0);
   const pending = useRef(null);
   const initialized = useRef(null);
+  const identity = useRef(null);
+  const currentAccount = useRef(null);
 
-  useEffect(() => () => { sequence.current++; pending.current?.abort(); }, []);
+  useEffect(() => () => { sequence.current++; pending.current?.abort(); identity.current?.controller.abort(); identity.current = null; }, []);
 
-  const signOut = useCallback((message = '') => {
+  const expire = useCallback((message = 'Tu sesión venció. Vuelve a iniciar sesión con Google.') => {
+    identity.current?.controller.abort();
+    identity.current = null;
+    setSession(null); setBusy(false); setError(message);
+  }, []);
+
+  const signOut = useCallback(() => {
     sequence.current++;
     pending.current?.abort();
-    setSession(null); setBusy(false); setError(message);
+    expire('');
+    if (currentAccount.current) clearAccountCache(currentAccount.current.id);
+    currentAccount.current = null;
+    setAccount(null);
     globalThis.google?.accounts?.id?.disableAutoSelect();
-  }, []);
+  }, [expire]);
 
   const signIn = useCallback(async credential => {
     const attempt = ++sequence.current;
     pending.current?.abort();
+    identity.current?.controller.abort();
+    identity.current = null;
     const controller = new AbortController();
     pending.current = controller;
     setSession(null); setBusy(true); setError('');
     try {
       const verified = await verifyGoogleCredential(credential, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]) });
-      if (sequence.current === attempt) setSession(verified);
+      if (sequence.current === attempt) {
+        if (currentAccount.current && currentAccount.current.id !== verified.user.id) throw new Error('Entra con la misma cuenta para conservar este espacio. Para cambiar de cuenta, cierra sesión primero.');
+        identity.current = { credential, expiresAt: verified.expiresAt, controller: new AbortController() };
+        currentAccount.current = verified.user;
+        setAccount(verified.user);
+        setSession(verified);
+      }
     } catch (error) {
       if (sequence.current === attempt) setError(error.message);
     } finally {
       if (sequence.current === attempt) { setBusy(false); pending.current = null; }
     }
   }, []);
+
+  const cancelSignIn = useCallback(() => {
+    sequence.current++;
+    pending.current?.abort();
+    expire('');
+  }, [expire]);
+
+  const request = useCallback(async (path, options = {}) => {
+    const active = identity.current;
+    if (!active || Date.now() >= active.expiresAt) {
+      expire();
+      throw new SyncError('Vuelve a iniciar sesión para sincronizar tus grupos.', 'auth_required');
+    }
+    try {
+      const result = await accountRequest(active.credential, path, {
+        ...options,
+        signal: options.signal ? AbortSignal.any([options.signal, active.controller.signal]) : active.controller.signal,
+      });
+      if (identity.current !== active) throw new SyncError('La sesión cambió. La solicitud se descartó.', 'auth_required');
+      return result;
+    } catch (error) {
+      if (identity.current === active && error.code === 'auth_required') expire(error.message);
+      throw error;
+    }
+  }, [expire]);
 
   const initialize = useCallback(sdk => {
     if (initialized.current === sdk) return;
@@ -43,12 +91,12 @@ export default function useGoogleAuth() {
 
   useEffect(() => {
     if (!session) return;
-    const check = () => { if (Date.now() >= session.expiresAt) signOut('Tu sesión venció. Vuelve a iniciar sesión con Google.'); };
+    const check = () => { if (Date.now() >= session.expiresAt) expire(); };
     const timer = setTimeout(check, Math.max(0, session.expiresAt - Date.now()));
     globalThis.addEventListener('focus', check);
     globalThis.addEventListener('visibilitychange', check);
     return () => { clearTimeout(timer); globalThis.removeEventListener('focus', check); globalThis.removeEventListener('visibilitychange', check); };
-  }, [session, signOut]);
+  }, [session, expire]);
 
-  return { session, busy, error, initialize, signOut };
+  return { session, account, busy, error, initialize, signOut, cancelSignIn, request, signal: identity.current?.controller.signal };
 }

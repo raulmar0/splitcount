@@ -6,15 +6,15 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const GROUP_PATH = /^\/groups\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
 const HASH = /^[0-9a-f]{64}$/;
 
-class HttpError extends Error {
+export class HttpError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
 }
 
-function json(data, status = 200) {
+export function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
-function errorResponse(error) {
+export function errorResponse(error) {
   if (error instanceof HttpError || error instanceof GoogleAuthError) return json({ error: error.code, message: error.message }, error.status);
   if (error instanceof SyncValidationError) return json({ error: error.code, message: error.message }, 400);
   return json({ error: 'internal_error', message: 'No se pudo completar la solicitud.' }, 500);
@@ -30,7 +30,7 @@ function withCors(response, origin) {
   headers.append('Vary', 'Origin');
   if (origin && allowedOrigin(origin)) {
     headers.set('Access-Control-Allow-Origin', origin);
-    headers.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+    headers.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     headers.set('Access-Control-Max-Age', '86400');
   }
@@ -43,7 +43,7 @@ function tokenFromRequest(request) {
   return match[1];
 }
 
-async function hashToken(token) {
+export async function hashToken(token) {
   const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)));
   return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
 }
@@ -55,7 +55,7 @@ function sameHash(left, right) {
   return difference === 0;
 }
 
-async function readJson(request, maximumBytes = MAX_GROUP_BYTES) {
+export async function readJson(request, maximumBytes = MAX_GROUP_BYTES) {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('Content-Type') ?? '')) throw new HttpError(415, 'unsupported_media_type', 'Envía los datos como JSON.');
   const declaredLength = request.headers.get('Content-Length');
   if (declaredLength !== null && Number(declaredLength) > maximumBytes) throw new HttpError(413, 'payload_too_large', 'La solicitud supera el tamaño permitido.');
@@ -140,6 +140,13 @@ export async function handleRequest(request, env) {
     const path = new URL(request.url).pathname;
     if (request.method === 'GET' && path === '/health') return withCors(json({ service: 'entre-sync', version: VERSION }), origin);
     if (request.method === 'GET' && path === '/auth/me') return withCors(json(await authenticateGoogleRequest(request, env.GOOGLE_CLIENT_ID)), origin);
+    if (path === '/account/groups' || path.startsWith('/account/groups/')) {
+      const { user } = await authenticateGoogleRequest(request, env.GOOGLE_CLIENT_ID);
+      const forwarded = new Request(request);
+      forwarded.headers.delete('Authorization');
+      const stub = env.ACCOUNTS.get(env.ACCOUNTS.idFromName(user.id));
+      return withCors(await stub.fetch(forwarded), origin);
+    }
     if (request.method === 'POST' && path === '/groups') {
       const payload = await readJson(request);
       if (!payload?.group || typeof payload.group !== 'object' || Array.isArray(payload.group)) throw new SyncValidationError();

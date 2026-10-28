@@ -30,17 +30,22 @@ export function IdentityDialog({ group, onChoose, onAdd, onClose }) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [unavailable, setUnavailable] = useState(false);
+  async function choose(id) {
+    setBusy(true); setError('');
+    try { await onChoose(id); } catch (error) { setError(error.message); setUnavailable(error.code === 'group_removed'); } finally { setBusy(false); }
+  }
   async function add(e) {
     e.preventDefault();
     if (!name.trim()) return;
     if (group.members.some(m => m.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase())) return setError('Este nombre ya está en la lista. Selecciónalo arriba.');
     setBusy(true); setError('');
-    try { await onAdd(name.trim()); } catch (error) { setError(error.message); } finally { setBusy(false); }
+    try { await onAdd(name.trim()); } catch (error) { setError(error.message); setUnavailable(error.code === 'group_removed'); } finally { setBusy(false); }
   }
   return <Modal title="¿Quién eres en este grupo?" subtitle={`Elige tu nombre para ver tu saldo en ${group.name}.`} onClose={onClose} closeDisabled={busy}>
-    <div className="share-identity">{group.members.map(m => <button key={m.id} className="identity-choice" onClick={() => onChoose(m.id)} disabled={busy}><span className="avatar">{m.name.slice(0, 1)}</span><strong>{m.name}</strong>{group._selfId === m.id ? <Check size={18} /> : <ArrowRight size={17} />}</button>)}</div>
-    <form className="form-stack identity-add" onSubmit={add}><label>¿Todavía no estás? Añade tu nombre<input maxLength={40} placeholder="Tu nombre" value={name} onChange={e => setName(e.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="button secondary" type="submit" disabled={busy || !name.trim()}>{busy ? 'Añadiendo…' : 'Añadirme al grupo'}</button></form>
-    <p className="field-hint identity-hint">Tu selección se guarda en este dispositivo. Puedes cambiarla cuando quieras.</p>
+    <div className="share-identity">{group.members.map(m => <button key={m.id} className="identity-choice" onClick={() => choose(m.id)} disabled={busy || unavailable}><span className="avatar">{m.name.slice(0, 1)}</span><strong>{m.name}</strong>{group._selfId === m.id ? <Check size={18} /> : <ArrowRight size={17} />}</button>)}</div>
+    <form className="form-stack identity-add" onSubmit={add}><label>¿Todavía no estás? Añade tu nombre<input maxLength={40} placeholder="Tu nombre" value={name} onChange={e => setName(e.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="button secondary" type="submit" disabled={busy || unavailable || !name.trim()}>{busy ? 'Añadiendo…' : 'Añadirme al grupo'}</button></form>
+    <p className="field-hint identity-hint">{group._account ? 'Tu selección se guarda en tu cuenta y se recupera en tus otros dispositivos.' : 'Tu selección se guarda en este dispositivo.'} Puedes cambiarla cuando quieras.</p>
   </Modal>;
 }
 

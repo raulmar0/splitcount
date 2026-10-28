@@ -22,7 +22,15 @@ A group can be shared through a link. **Anyone with the link can view and edit t
 
 Shared groups persist in a Cloudflare Durable Object with SQLite per group; the frontend is hosted on GitHub Pages. The active group refreshes every three seconds and on window focus or restored connectivity. Independent inserts combine; competing edits to the same movement surface a conflict. Pending shared writes suppress polling. Offline access shows the last cached copy; shared writes require a connection. Leaving a group removes it from this device and preserves other people's access.
 
-The member identity chosen on a device is a local preference, not authentication. Choosing a member changes whose balance is shown and the defaults for recording expenses; it does not provide an account or restrict the shared link's edit rights. Shared-link access and member identity must stay distinct in interface copy.
+The member identity chosen in a group is a display preference, not authentication. It is device-local in guest mode and recovered across devices when signed in. Choosing a member changes whose balance is shown and the defaults for recording expenses; it does not restrict the shared link's edit rights. Shared-link access, Google authentication and member identity must stay distinct in interface copy.
+
+## Optional Google accounts
+
+Google sign-in recovers a private directory of groups and the member identity selected for each group. Newly created account groups are stored online using the existing ledger engine. Guest groups are incorporated only through explicit selection in Settings; examples are separate and unselected by default. Original guest copies remain intact. Account backup import adds references rather than replacing the entire account.
+
+Each account has a separate browser cache. Logout clears that account's cache and returns to the existing guest workspace; it does not delete remote groups or other participants' access. Leaving a group while signed in removes its reference across the account's devices. Explicit invitation rejoining remains possible.
+
+Google credentials are memory-only. Reload requires sign-in again; expiry retains the workspace and open forms, with inline renewal available without losing drafts. Switching Google identities requires explicit logout. Account-directory polling is deferred while dialogs are open so remote removal does not dismantle an editing session. Shared-link authorization remains unchanged; selecting a member is not an authorization role.
 
 ## Constraints and commitments
 

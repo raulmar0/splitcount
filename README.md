@@ -46,18 +46,24 @@ Atrás cierra primero el formulario o filtro abierto y conserva el grupo de orig
 
 Pulsa **Compartir**, escribe tu nombre y crea el enlace del grupo. Quien lo abra conserva sus otros grupos, entra al grupo invitado y elige su integrante (o añade su nombre) para ver su propio saldo. El grupo activo consulta gastos, pagos, integrantes y detalles cada tres segundos, además de al volver a la ventana o recuperar conexión. Las altas simultáneas se combinan; si dos personas editan el mismo movimiento, Splitcount avisa del conflicto sin reemplazar silenciosamente la otra edición.
 
-**Cualquier persona que tenga el enlace puede ver y editar ese grupo.** La clave está en el fragmento de la URL y se envía a la API en `Authorization`; el servidor almacena solo su hash. El acceso con Google no cambia este permiso y no hay un directorio de grupos. Salir de un grupo lo quita de ese dispositivo y conserva el acceso de los demás.
+**Cualquier persona que tenga el enlace puede ver y editar ese grupo.** La clave está en el fragmento de la URL y se envía a la API en `Authorization`; el registro del grupo almacena solo su hash. El acceso con Google no cambia este permiso y no hay un directorio público. El directorio privado de tu cuenta conserva la clave para recuperar el grupo en otro dispositivo. Sin cuenta, salir quita el grupo de ese dispositivo; con cuenta, lo quita de todos tus dispositivos. Los demás conservan su acceso.
 
-Los grupos compartidos se guardan en un servicio persistente de Cloudflare con un Durable Object SQLite por grupo. Los grupos locales permanecen en `localStorage`; solo se suben cuando activas Compartir. Los tres grupos iniciales son ejemplos. Sin conexión puedes consultar la última copia; para guardar cambios compartidos se necesita conexión. Si falla una escritura, el formulario conserva el borrador y muestra el error.
+Los grupos en línea se guardan en un servicio persistente de Cloudflare con un Durable Object SQLite por grupo. En modo invitado, los grupos locales permanecen en `localStorage`; solo se suben al activar Compartir o al elegir incorporarlos a una cuenta. Los nuevos grupos creados con sesión iniciada se guardan en línea. Los tres grupos iniciales son ejemplos. Sin conexión puedes consultar la última copia disponible; para guardar cambios en línea se necesita conexión. Si falla una escritura, el formulario conserva el borrador y muestra el error.
 
 En **Ajustes → Tus datos**, exporta una copia JSON para respaldar o trasladar todos tus datos. **Incluye las claves de los grupos compartidos: guárdala como una copia privada.** La importación se valida antes de reemplazar la copia local. El CSV exporta gastos del grupo para análisis y no reemplaza al respaldo JSON. Las nuevas descargas usan nombres `splitcount-respaldo.json` y `splitcount-<grupo>.csv`.
 
 El tema inicial es oscuro. Puedes elegir claro u oscuro en Ajustes o con el botón de sol/luna de la barra superior. La preferencia se guarda en este navegador y se aplica antes de cargar React.
 ## Acceso opcional con Google
 
-En **Ajustes → Cuenta**, el botón oficial de Google permite verificar tu identidad. Puedes seguir usando todos los grupos sin iniciar sesión. La cuenta de Google no se asigna automáticamente a un integrante del grupo ni restringe los enlaces compartidos.
+En **Ajustes → Cuenta**, entra con Google para recuperar tus grupos, gastos, pagos y la identidad elegida en cada grupo en cualquier dispositivo. Los grupos nuevos se guardan automáticamente en tu cuenta. Puedes seguir usando el modo invitado sin registrarte; la cuenta de Google no restringe los enlaces compartidos ni convierte la selección de integrante en un permiso de edición.
 
-Esta primera integración **no guarda ni recupera grupos por cuenta**. El perfil verificado permanece solo en memoria; recargar la app o vencer el ID token requiere volver a iniciar sesión. Cerrar sesión no borra los grupos ni cierra tu sesión general de Google. No se guardan credenciales en `localStorage`, `sessionStorage` ni respaldos.
+Los datos previos del modo invitado no se suben automáticamente: usa **Añadir grupos de este dispositivo**, elige los grupos y confirma. Los ejemplos aparecen aparte, sin seleccionar. Sus copias originales se conservan. Los reintentos no duplican grupos; si cambiaste una copia local ya incorporada y no puede reconciliarse con seguridad, se muestra el conflicto sin sobrescribirla.
+
+La lista de grupos de la cuenta se recupera al entrar, cada 15 segundos y al volver a la ventana o recuperar conexión. El grupo activo conserva su actualización cada tres segundos. Mientras tienes un formulario abierto, se difiere la recuperación de la lista para no desmontar su borrador. Las modificaciones independientes se combinan y los conflictos se muestran.
+
+Cada cuenta usa una caché separada; el modo invitado conserva `entre-state-v1`. **Cerrar sesión limpia la caché de esa cuenta en este navegador**, sin borrar los grupos de Cloudflare ni los datos invitados. El perfil y el ID token de Google permanecen solo en memoria; recargar o vencer la sesión requiere volver a entrar. Si vence mientras editas, puedes volver a entrar desde el mismo formulario, sin perder el borrador. Para cambiar de cuenta, cierra sesión primero. No se guardan tokens de Google en `localStorage`, `sessionStorage` ni respaldos; los respaldos sí contienen las claves privadas de los grupos.
+
+Importar un respaldo sin sesión conserva el comportamiento de reemplazo local. Con sesión, añade grupos a la cuenta sin borrar los existentes; vincular un grupo compartido conserva su versión actual en línea. Si falla una incorporación, las anteriores que terminaron permanecen guardadas.
 
 El Client ID público está en `src/google-config.js`; Cloudflare recibe el mismo valor mediante el binding `GOOGLE_CLIENT_ID`. El flujo usa Google Identity Services con popup y callback, sin secreto OAuth ni URI de redirección. **No copies el JSON de credenciales al repositorio ni al frontend.**
 
@@ -75,7 +81,9 @@ API desplegada: `https://entre-sync.raulhdz40.workers.dev`. Su código, pruebas,
 
 ## Publicación
 
-El flujo [pages.yml](.github/workflows/pages.yml) instala con `npm ci`, ejecuta las pruebas, compila y publica `dist/` con las acciones oficiales de GitHub Pages. En el repositorio, selecciona **Settings → Pages → Source → GitHub Actions**. Cada cambio en `main` inicia el despliegue; también puede lanzarse manualmente desde Actions. La base relativa de Vite permite servir la app desde la ruta del repositorio.
+El flujo [pages.yml](.github/workflows/pages.yml) instala las dependencias del frontend y del Worker, ejecuta las pruebas, compila y publica `dist/` con las acciones oficiales de GitHub Pages. En el repositorio, selecciona **Settings → Pages → Source → GitHub Actions**. Cada cambio en `main` inicia el despliegue; también puede lanzarse manualmente desde Actions. La base relativa de Vite permite servir la app desde la ruta del repositorio.
+
+Para publicar la sincronización de cuentas, despliega primero el Worker con el nuevo binding `ACCOUNTS` y el export `AccountDirectory`, sin reemplazar `GROUPS` ni `GroupLedger`; después publica el frontend. Los pasos y límites están en `sync-server/README.md`.
 
 Enlaces:
 

@@ -44,18 +44,19 @@ export function attachRemoteGroup(local, envelope, capability) {
   return {
     ...group,
     _shared: { id: group.id, token: capability.token, revision: envelope.revision },
+    ...(local?.id === group.id && local._shared?.token === capability.token && local._account ? { _account: { ...local._account } } : {}),
     ...(local?._selfId && group.members.some(m => m.id === local._selfId) ? { _selfId: local._selfId } : {}),
   };
 }
 
-async function request(path, { method = 'GET', body, token, fetcher = globalThis.fetch, base = SYNC_API } = {}) {
+async function request(path, { method = 'GET', body, token, fetcher = globalThis.fetch, base = SYNC_API, signal } = {}) {
   let res;
   try {
     res = await fetcher(`${base.replace(/\/$/, '')}${path}`, {
       method,
       headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(12000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(12000)]) : AbortSignal.timeout(12000),
       cache: 'no-store',
       credentials: 'omit',
       referrerPolicy: 'no-referrer',

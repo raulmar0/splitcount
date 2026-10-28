@@ -1,10 +1,20 @@
 import { DurableObject } from 'cloudflare:workers';
 import { GroupStore, handleRequest } from './service.js';
+import { AccountStore } from './account-store.js';
 
 export class GroupLedger extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.store = new GroupStore(ctx.storage);
+  }
+
+  fetch(request) { return this.store.fetch(request); }
+}
+
+export class AccountDirectory extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.store = new AccountStore(ctx.storage, env);
   }
 
   fetch(request) { return this.store.fetch(request); }

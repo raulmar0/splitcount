@@ -88,6 +88,7 @@ test('stores the verified profile only in memory and signs out without touching 
   assert.equal(app.auth.busy, false);
   await act(async () => app.auth.signOut());
   assert.equal(app.auth.session, null);
+  assert.equal(app.auth.account, null);
   assert.equal(app.disabled, 1);
 });
 
@@ -114,7 +115,7 @@ test('failed validation never shows a signed-in user', async () => {
   assert.equal(app.auth.busy, false);
 });
 
-test('focus after expiry clears the account and asks for another sign-in', async () => {
+test('focus after expiry retains account scope for drafts and asks for another sign-in', async () => {
   const events = new EventTarget();
   globalThis.addEventListener = events.addEventListener.bind(events);
   globalThis.removeEventListener = events.removeEventListener.bind(events);
@@ -125,7 +126,41 @@ test('focus after expiry clears the account and asks for another sign-in', async
   Date.now = () => expected.expiresAt + 1;
   await act(async () => events.dispatchEvent(new Event('focus')));
   assert.equal(app.auth.session, null);
+  assert.equal(app.auth.account.id, expected.user.id);
   assert.match(app.auth.error, /sesión venció/);
+});
+
+test('authenticated requests are cancelled on logout and delayed data cannot cross sessions', async () => {
+  globalThis.fetch = async () => Response.json(profile());
+  const app = await mount();
+  await act(async () => { app.signIn(); });
+  let resolve, signal;
+  globalThis.fetch = (_url, options) => {
+    assert.equal(options.headers.Authorization, 'Bearer test-credential');
+    assert.equal(options.credentials, 'omit');
+    signal = options.signal;
+    return new Promise(done => { resolve = done; });
+  };
+  let request;
+  await act(async () => { request = app.auth.request('/account/groups'); });
+  const rejected = assert.rejects(request, { code: 'auth_required' });
+  await act(async () => app.auth.signOut());
+  assert.equal(signal.aborted, true);
+  await act(async () => { resolve(Response.json({ revision: 0, groups: [] })); await rejected; });
+  assert.equal(app.auth.account, null);
+  assert.equal(app.auth.session, null);
+});
+
+test('reauthentication with another Google account cannot replace an open workspace', async () => {
+  const expected = profile();
+  globalThis.fetch = async () => Response.json(expected);
+  const app = await mount();
+  await act(async () => { app.signIn(); });
+  globalThis.fetch = async () => Response.json({ ...expected, user: { ...expected.user, id: 'another-account' } });
+  await act(async () => { app.signIn(); });
+  assert.equal(app.auth.account.id, expected.user.id);
+  assert.equal(app.auth.session, null);
+  assert.match(app.auth.error, /misma cuenta/);
 });
 
 test('SDK loading is shared, handles errors/timeouts, and can retry without duplicate scripts', async t => {

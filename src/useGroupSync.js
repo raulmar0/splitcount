@@ -15,7 +15,11 @@ const messageOf = error => error instanceof Error && error.message
   ? error.message : 'No se pudo sincronizar el grupo. Vuelve a intentarlo.';
 const failureStatus = error => isOffline() || error?.code === 'network' ? 'offline' : 'error';
 
-export default function useGroupSync({ state, setState, onJoined }) {
+export default function useGroupSync({ state, setState, onJoined, enabled = true, signal, registerShared }) {
+  const access = useRef({ enabled, signal, registerShared });
+  access.current = { enabled, signal, registerShared };
+  const sameAccess = scope => access.current.enabled && access.current.signal === scope.signal && !scope.signal?.aborted;
+  const requireAccess = (scope = access.current) => { if (!sameAccess(scope)) throw new SyncError('Vuelve a iniciar sesión para guardar en tu cuenta. Tu borrador se conserva.', 'auth_required'); };
   const stateRef = useRef(state);
   stateRef.current = state;
   const onJoinedRef = useRef(onJoined);
@@ -40,14 +44,14 @@ export default function useGroupSync({ state, setState, onJoined }) {
 
   // Validate every response, and preserve the viewer chosen on this device.
   // The checks inside the updater also cover edits queued since the request began.
-  const cacheEnvelope = useCallback((id, envelope, capability) => {
+  const cacheEnvelope = useCallback((id, envelope, capability, scope = access.current) => {
     const cached = stateRef.current.groups.find(group => group.id === id);
     const remote = attachRemoteGroup(cached, envelope, capability);
-    if (!mounted.current) return remote;
+    if (!mounted.current || !sameAccess(scope)) return remote;
     setState(previous => ({
       ...previous,
       groups: previous.groups.map(current => {
-        if (current.id !== id || !validSharing(current)
+        if (!sameAccess(scope) || current.id !== id || !validSharing(current)
           || current._shared.token !== capability.token
           || current._shared.revision > remote._shared.revision) return current;
         return attachRemoteGroup(current, envelope, capability);
@@ -59,14 +63,15 @@ export default function useGroupSync({ state, setState, onJoined }) {
 
   const poll = useCallback(async (id = stateRef.current.activeGroupId) => {
     const group = stateRef.current.groups.find(item => item.id === id);
-    if (!hasSharing(group) || pendingSet.current.has(id) || pollingSet.current.has(id)) return;
+    if (!access.current.enabled || !hasSharing(group) || pendingSet.current.has(id) || pollingSet.current.has(id)) return;
     if (!validSharing(group)) { report(id, 'error', INVALID_SHARING); return; }
     if (isOffline()) { report(id, 'offline', OFFLINE); return; }
     const capability = group._shared;
+    const scope = access.current;
     pollingSet.current.add(id);
     try {
-      const envelope = await fetchSharedGroup(capability);
-      if (!mounted.current || pendingSet.current.has(id)) return;
+      const envelope = await fetchSharedGroup(capability, { signal: scope.signal });
+      if (!mounted.current || !sameAccess(scope) || pendingSet.current.has(id)) return;
       const current = stateRef.current.groups.find(item => item.id === id);
       if (!validSharing(current) || current._shared.token !== capability.token) return;
       // A response that began before a save must never rewind the cache.
@@ -75,7 +80,7 @@ export default function useGroupSync({ state, setState, onJoined }) {
         setState(previous => ({
           ...previous,
           groups: previous.groups.map(item => {
-            if (item.id !== id || pendingSet.current.has(id) || !validSharing(item)
+            if (!sameAccess(scope) || item.id !== id || pendingSet.current.has(id) || !validSharing(item)
               || item._shared.token !== capability.token
               || item._shared.revision >= remote._shared.revision) return item;
             return attachRemoteGroup(item, envelope, capability);
@@ -85,29 +90,41 @@ export default function useGroupSync({ state, setState, onJoined }) {
       report(id, 'synced');
     } catch (error) {
       const current = stateRef.current.groups.find(item => item.id === id);
-      if (!pendingSet.current.has(id) && validSharing(current)
+      if (sameAccess(scope) && !pendingSet.current.has(id) && validSharing(current)
         && current._shared.token === capability.token) report(id, failureStatus(error), messageOf(error));
     } finally {
       pollingSet.current.delete(id);
     }
   }, [report, setState]);
 
-  const joinGroup = useCallback(async (capability = lastInvite.current) => {
+  const joinGroup = useCallback(async (capability) => {
+    const retry = capability === undefined;
+    capability ??= lastInvite.current;
     const attempt = ++joinAttempt.current;
     lastInvite.current = capability;
+    const scope = access.current;
     setJoinState({ loading: true, error: '' });
     try {
-      const envelope = await fetchSharedGroup(capability);
-      if (!mounted.current || attempt !== joinAttempt.current) return null;
+      requireAccess(scope);
+      const envelope = await fetchSharedGroup(capability, { signal: scope.signal });
+      if (!mounted.current || !sameAccess(scope) || attempt !== joinAttempt.current) return null;
       const existing = stateRef.current.groups.find(group => group.id === capability.id);
       const received = attachRemoteGroup(existing, envelope, capability);
-      const remote = validSharing(existing) && existing._shared.token === capability.token
+      let remote = validSharing(existing) && existing._shared.token === capability.token
         && existing._shared.revision > received._shared.revision ? existing : received;
+      if (scope.registerShared) remote = await scope.registerShared(remote, { retry });
+      if (!mounted.current || attempt !== joinAttempt.current || !sameAccess(scope)) return null;
       setState(previous => {
+        if (!sameAccess(scope)) return previous;
         const current = previous.groups.find(group => group.id === remote.id);
         const joined = current && validSharing(current) && current._shared.token === capability.token
-          && current._shared.revision > remote._shared.revision
-          ? current : attachRemoteGroup(current, envelope, capability);
+          && current._shared.revision >= remote._shared.revision
+          ? { ...current } : attachRemoteGroup(current ?? remote, { group: remote, revision: remote._shared.revision }, capability);
+        if (remote._account && (!joined._account || joined._account.version <= remote._account.version)) {
+          joined._account = remote._account;
+          if (remote._selfId) joined._selfId = remote._selfId;
+          else delete joined._selfId;
+        }
         return {
           ...previous,
           activeGroupId: joined.id,
@@ -154,7 +171,7 @@ export default function useGroupSync({ state, setState, onJoined }) {
   const activeId = active?.id;
   const activeToken = validSharing(active) ? active._shared.token : null;
   useEffect(() => {
-    if (!activeToken) return undefined;
+    if (!activeToken || !enabled) return undefined;
     const refresh = () => { void poll(activeId); };
     const offline = () => { if (!pendingSet.current.has(activeId)) report(activeId, 'offline', OFFLINE); };
     refresh();
@@ -168,9 +185,11 @@ export default function useGroupSync({ state, setState, onJoined }) {
       globalThis.removeEventListener?.('online', refresh);
       globalThis.removeEventListener?.('offline', offline);
     };
-  }, [activeId, activeToken, poll, report]);
+  }, [activeId, activeToken, enabled, poll, report]);
 
   const saveGroup = useCallback(async (after, before) => {
+    const scope = access.current;
+    requireAccess(scope);
     const baseline = before ?? stateRef.current.groups.find(group => group.id === after.id);
     if (!baseline) throw new SyncError('Este grupo ya no está disponible.');
     if (pendingSet.current.has(baseline.id)) throw new SyncError('Espera a que termine de guardarse el cambio anterior.');
@@ -185,14 +204,15 @@ export default function useGroupSync({ state, setState, onJoined }) {
     pendingSet.current.add(baseline.id);
     report(baseline.id, 'pending');
     try {
-      const saved = await commitSharedGroup(baseline, after);
-      const remote = cacheEnvelope(baseline.id, { group: saved, revision: saved._shared.revision }, baseline._shared);
+      const saved = await commitSharedGroup(baseline, after, { signal: scope.signal });
+      requireAccess(scope);
+      const remote = cacheEnvelope(baseline.id, { group: saved, revision: saved._shared.revision }, baseline._shared, scope);
       report(baseline.id, 'synced');
       return remote;
     } catch (error) {
-      if (error instanceof SyncError && error.code === 'conflict' && error.latest) {
+      if (sameAccess(scope) && error instanceof SyncError && error.code === 'conflict' && error.latest) {
         // Keep the form's draft open while the rest of the app gets the latest data.
-        try { cacheEnvelope(baseline.id, error.latest, baseline._shared); } catch { /* Retain the valid cache. */ }
+        try { cacheEnvelope(baseline.id, error.latest, baseline._shared, scope); } catch { /* Retain the valid cache. */ }
       }
       report(baseline.id, failureStatus(error), messageOf(error));
       throw error;
@@ -202,6 +222,8 @@ export default function useGroupSync({ state, setState, onJoined }) {
   }, [cacheEnvelope, report, setState]);
 
   const shareGroup = useCallback(async (before, name, selfId) => {
+    const scope = access.current;
+    requireAccess(scope);
     if (!before.members.some(member => member.id === selfId) || typeof name !== 'string' || !name.trim()) {
       throw new SyncError('Elige quién eres y escribe tu nombre para compartir el grupo.');
     }
@@ -224,11 +246,12 @@ export default function useGroupSync({ state, setState, onJoined }) {
         ...before,
         _selfId: selfId,
         members: before.members.map(member => member.id === selfId ? { ...member, name: name.trim() } : member),
-      });
+      }, { signal: scope.signal });
+      requireAccess(scope);
       if (!unchanged(stateRef.current.groups.find(group => group.id === before.id))) throw changedError();
       if (mounted.current) setState(previous => {
         // An import queued after the response check must also retain its data.
-        if (!unchanged(previous.groups.find(group => group.id === before.id))) return previous;
+        if (!sameAccess(scope) || !unchanged(previous.groups.find(group => group.id === before.id))) return previous;
         return {
           ...previous,
           activeGroupId: remote.id,
@@ -253,10 +276,10 @@ export default function useGroupSync({ state, setState, onJoined }) {
   }, []);
   const result = groupResults[activeId];
   const invalid = hasSharing(active) && !validSharing(active);
-  const status = invalid ? 'error' : pendingSet.current.has(activeId) ? 'pending'
+  const status = !enabled ? 'error' : invalid ? 'error' : pendingSet.current.has(activeId) ? 'pending'
     : !hasSharing(active) ? (result?.status === 'error' || result?.status === 'offline' ? result.status : 'local')
       : isOffline() ? 'offline' : result?.status ?? 'pending';
-  const error = invalid ? INVALID_SHARING : status === 'offline' ? result?.error || OFFLINE : result?.error || '';
+  const error = !enabled ? 'Vuelve a iniciar sesión para sincronizar. Tu copia se conserva.' : invalid ? INVALID_SHARING : status === 'offline' ? result?.error || OFFLINE : result?.error || '';
 
   return { status, error, joinState, joinGroup, retrySync, saveGroup, shareGroup, dismissJoin };
 }

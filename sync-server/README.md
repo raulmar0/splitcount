@@ -1,6 +1,6 @@
 # Entre shared groups
 
-This Cloudflare Worker keeps one SQLite-backed Durable Object per shared group. The React app remains static on GitHub Pages. Optional Google identity verification is separate from group access: possession of the secret link permits reading and editing that group. There is no stored account profile or public group directory.
+This Cloudflare Worker keeps one SQLite-backed Durable Object per group and one private directory per Google account. The React app remains static on GitHub Pages. Google authentication recovers account references; possession of a group's secret link still permits reading and editing it. There is no stored Google token, duplicated account ledger, or public group directory.
 
 ## Local development
 
@@ -32,11 +32,13 @@ Deployment verified on 2026-10-27: Cloudflare version `5e286e15-6235-4168-b0dc-5
 
 If authenticated reads/writes fail or concurrent expenses disappear, restore a reviewed working backend snapshot, run `npm ci`, and redeploy. Preserve the Worker name, `GroupLedger` export and `GROUPS` binding so existing stored groups remain available; do not delete/recreate the namespace as part of a code rollback.
 
+Account synchronization adds the SQLite `AccountDirectory` export and `ACCOUNTS` binding; it does not rename or migrate `GroupLedger`. Deploy this backend before publishing the new frontend. After the first account deployment, preserve **both** Durable Object exports and bindings in rollbacks, even if account UI is temporarily disabled. No account namespace migration has been deployed merely by building this checkout.
+
 Official configuration documentation: <https://developers.cloudflare.com/cf/projects/cloudflare-config/>.
 
 ## HTTP API
 
-Every response is JSON, except empty OPTIONS responses, and sends `Cache-Control: no-store`. A browser origin must be exactly `https://raulmar0.github.io`, or HTTP/HTTPS localhost or `127.0.0.1` with an optional port. Requests without an Origin header are accepted with the same authorization rules. Allowed CORS headers are Content-Type and Authorization; supported methods are GET, POST, PATCH and OPTIONS.
+Every response is JSON, except empty OPTIONS responses, and sends `Cache-Control: no-store`. A browser origin must be exactly `https://raulmar0.github.io`, or HTTP/HTTPS localhost or `127.0.0.1` with an optional port. Requests without an Origin header are accepted with the same authorization rules. Allowed CORS headers are Content-Type and Authorization; supported methods are GET, POST, PATCH, DELETE and OPTIONS.
 
 - `GET /health`: `{ "service": "entre-sync", "version": "1.0.0" }`.
 - `GET /auth/me`, `Authorization: Bearer <Google ID token>`: verifies Google's RS256 signature with cached, rotating public JWKS, issuer, the configured client audience, issue time, expiry, stable subject and verified email. Returns `{ "user": { "id": sub, "name": name, "email": email }, "expiresAt": milliseconds }`. Invalid credentials return 401; missing configuration or unavailable Google verification returns 503. This route does not allocate group storage, persist tokens or issue session cookies.
@@ -46,12 +48,29 @@ Every response is JSON, except empty OPTIONS responses, and sends `Cache-Control
 
 Missing or incorrect authorization returns 401. Unknown valid UUIDs return 404. A conflict returns HTTP 409 `{ "error": "conflict", "message": "…", "group": latestGroup, "revision": latestRevision }`. Validation returns 400, oversized requests 413, unsupported content types 415, and disallowed browser origins 403. Other errors use `{ "error": code, "message": safeMessage }`; internal errors reveal no storage details.
 
-There is no list, lookup by name, public initialization or deletion endpoint.
+There is no public list, lookup by name, initialization or ledger deletion endpoint.
+
+## Private account directory
+
+All `/account/groups` requests use `Authorization: Bearer <Google ID token>`. The Worker validates it for every request and derives the directory namespace exclusively from the signed `sub`, not from request data. It strips this header before forwarding to the internal Durable Object. The directory stores private group capabilities and the selected member identity so another authenticated device can recover them. Group storage retains only each capability's hash; recoverable keys in the directory are protected by Google authentication and Cloudflare storage, not by end-to-end encryption.
+
+- `GET /account/groups`: `{ revision, groups: [{ id, token, selfId, version, sourceId }] }`, containing only active references.
+- `POST /account/groups`: `{ sourceId, group, selfId }` creates a ledger, or `{ sourceId, id, token, selfId }` associates an existing one after verifying the key. Returns `{ entry, envelope: { group, revision }, revision }`. `selfId` is null or an existing member ID. An active association preserves its current identity.
+- `PATCH /account/groups/:uuid`: `{ selfId, version }` updates the account's selected member with compare-and-swap; returns `{ entry, revision }`.
+- `DELETE /account/groups/:uuid`: `{ version }` removes only this account's reference, not the ledger or other accounts' access; returns `{ revision }`.
+
+`sourceId` is a stable operation ID of up to 160 characters. The directory persists a create reservation (random UUID/key, original snapshot and fingerprint) before touching a ledger, allowing retries across interruption or a lost response. Finalized reservations retain only their fingerprint/reference. A changed initial payload returns `409 operation_conflict`, never an overwrite. A source ID that has been removed returns `410 group_removed`; explicit rejoining requires a fresh source ID.
+
+Identity/removal conflicts return `409 account_conflict` with authoritative `{ entry, revision }`; `entry: null` means the reference was removed. Versions remain monotonic across removal and rejoin, fencing old deletion attempts. Account writes are serialized across storage and ledger awaits. An identical accepted operation can be retried without duplicating groups.
+
+Limits: 100 active/reserved groups, 1,000 lifetime operation records/tombstones, 1 MiB of directory state, 256 KiB + 1 KiB per streamed create/link request and 1 KiB per identity/removal request. Exhaustion returns `account_limit` rather than evicting tombstones and allowing stale resurrection. Increasing these limits requires a reviewed storage strategy; no automatic tombstone compaction is implemented.
+
+The client requests a bounded directory and fetches its ledgers with at most four concurrent reads. It replaces the cached account list only after full validated recovery, rejects stale revisions, pauses list replacement while forms are open, and aborts session-bound requests on logout/expiry. Guest and account caches are separate. Google credentials remain memory-only; there are no refresh tokens or persistent server sessions.
 ## Google configuration
 
 `cloudflare.config.ts` declares `GOOGLE_CLIENT_ID` as a public text binding using `src/google-config.js` from the parent app. The OAuth client secret and downloaded credential JSON are not needed by this popup/ID-token flow. Do not deploy them as static assets or commit them. `jose` is the Worker's JWT verification dependency; install this project's dependencies before running the root test suite as well.
 
-The browser sends the credential in an explicit Authorization header with cookies omitted. Existing origin validation and preflight rules apply to `/auth/me`; profiles and errors use `Cache-Control: no-store`. Google identity tokens cannot replace the invitation capability on `/groups/:uuid`. Account-to-group recovery and member authorization are not implemented.
+The browser sends the credential in an explicit Authorization header with cookies omitted. Existing origin validation and preflight rules apply to `/auth/me` and the account routes; profiles and errors use `Cache-Control: no-store`. Google identity tokens cannot replace the invitation capability on `/groups/:uuid`. Account recovery does not add member roles or revoke existing invitation keys.
 
 ## Changes and concurrency
 
