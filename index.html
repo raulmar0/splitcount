@@ -1,9 +1,17 @@
 <!doctype html>
-<html lang="es">
+<html lang="es" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#173d2a" />
+    <meta name="theme-color" content="#10100f" />
+    <script>
+      try {
+        const theme = localStorage.getItem('entre-theme-v1');
+        document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+      } catch {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    </script>
     <meta
       name="description"
       content="Reparte los gastos de tus viajes y planes con amigos. Lleva las cuentas claras, calcula balances y registra pagos con Entre."
@@ -12,7 +20,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;800&display=swap"
       rel="stylesheet"
     />
     <title>Entre — las cuentas claras</title>

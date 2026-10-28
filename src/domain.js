@@ -92,6 +92,11 @@ function isGroup(group) {
     || !group.members.every((member) => isId(member.name))
     || !hasUniqueIds(group.expenses) || !hasUniqueIds(group.settlements)) return false;
   const memberIds = new Set(group.members.map(({ id }) => id));
+  if (group._selfId !== undefined && !memberIds.has(group._selfId)) return false;
+  if (group._shared !== undefined && (!isRecord(group._shared)
+    || group._shared.id !== group.id || !/^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i.test(group.id)
+    || typeof group._shared.token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(group._shared.token)
+    || !Number.isSafeInteger(group._shared.revision) || group._shared.revision < 1)) return false;
   if (!group.expenses.every((expense) => isExpense(expense, memberIds))) return false;
   if (!group.settlements.every((payment) => memberIds.has(payment.from) && memberIds.has(payment.to)
     && payment.from !== payment.to && isCents(payment.amount) && payment.amount > 0 && isDate(payment.date))) return false;
