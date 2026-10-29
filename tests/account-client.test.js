@@ -36,7 +36,7 @@ beforeEach(() => {
 
 test('blocked browser storage never prevents guest use or account sign-out', () => {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new Error('blocked'); } });
-  assert.ok(loadWorkspace(null).groups.length);
+  assert.deepEqual(loadWorkspace(null), emptyState());
   assert.deepEqual(loadWorkspace('A'), emptyState());
   assert.equal(saveWorkspace(emptyState(), 'A'), false);
   assert.doesNotThrow(() => clearAccountCache('A'));

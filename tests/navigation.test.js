@@ -13,6 +13,9 @@ test('a removed group or unknown screen returns safely to the groups list', () =
   assert.equal(resolveRoute({ buenpar: { screen: 'group', groupId: 'gone' } }, groups).screen, 'groups');
   assert.equal(resolveRoute({ buenpar: { screen: 'unknown' } }, groups).screen, 'groups');
 });
+test('obsolete Activity history opens Groups after Activity is removed', () => {
+  assert.deepEqual(resolveRoute({ buenpar: { screen: 'activity', depth: 4 } }, groups), { screen: 'groups', groupId: null, depth: 0 });
+});
 test('navigation preserves unrelated history state and tracks in-app back depth', () => {
   const current = { other: 'keep', buenpar: { screen: 'groups', depth: 0 } };
   assert.deepEqual(nextHistoryState(current, 'group', 'trip'), { other: 'keep', buenpar: { screen: 'group', groupId: 'trip', depth: 1 } });

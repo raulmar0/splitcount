@@ -22,7 +22,7 @@ export function errorResponse(error) {
 }
 
 function allowedOrigin(origin) {
-  return origin === 'https://raulmar0.github.io' || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(origin);
+  return origin === 'https://raulmar0.github.io' || origin === 'https://splitcount.raulmar.com' || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(origin);
 }
 
 function withCors(response, origin) {

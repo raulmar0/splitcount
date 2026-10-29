@@ -154,7 +154,7 @@ test('invalid batches preserve both stored data and revision', async () => {
 
 test('allowed origins get CORS headers and preflight permits content type and authorization', async () => {
   const api = service();
-  for (const origin of [ORIGIN, 'http://localhost:5173', 'http://127.0.0.1:4173']) {
+  for (const origin of [ORIGIN, 'https://splitcount.raulmar.com', 'http://localhost:5173', 'http://127.0.0.1:4173']) {
     const { response } = await api.request('/groups', { method: 'OPTIONS', origin, headers: { 'Access-Control-Request-Method': 'PATCH', 'Access-Control-Request-Headers': 'Content-Type,Authorization' } });
     assert.equal(response.status, 204);
     assert.equal(response.headers.get('Access-Control-Allow-Origin'), origin);
@@ -167,7 +167,7 @@ test('allowed origins get CORS headers and preflight permits content type and au
 
 test('hostile browser origins cannot create or access groups', async () => {
   const api = service();
-  for (const origin of ['https://raulmar0.github.io.evil.example', 'https://other.github.io', 'http://raulmar0.github.io', 'null', 'http://localhost.evil.example', 'https://raulmar0.github.io:8443']) {
+  for (const origin of ['http://splitcount.raulmar.com', 'https://splitcount.raulmar.com.evil.example', 'https://splitcount.raulmar.com:8443', 'https://raulmar0.github.io.evil.example', 'https://other.github.io', 'http://raulmar0.github.io', 'null', 'http://localhost.evil.example', 'https://raulmar0.github.io:8443']) {
     const { response } = await api.request('/groups', { method: 'POST', origin, body: { group: group() } });
     assert.equal(response.status, 403);
     assert.equal(response.headers.get('Access-Control-Allow-Origin'), null);

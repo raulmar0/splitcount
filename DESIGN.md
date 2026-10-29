@@ -4,7 +4,7 @@ Splitcount is a shared-expense ledger designed from the phone. The first screen 
 
 The identity pairs the selected ImageGen **Reparto** symbol with a live **Manrope** Splitcount wordmark. Three mint forms fit around a Y-shaped negative space, suggesting a shared expense divided into equal parts. The transparent PNG is used in the header, desktop sidebar, favicon and app metadata. [Logo provenance and prompts](docs/brand/splitcount-logo.md) identify the selected proposal, transparent refinement and shipped asset. [The earlier Buenpar logo record](docs/brand/logo-prompt.md) remains as history.
 
-The visual foundation continues the **True-black flat** direction, taste-skill seed **1298005779**. Warm near-black surfaces use lightness for elevation; mint controls and restrained status colours establish emphasis. The interface uses no photographic hero, slogans, emoji navigation, rainbow categories, gradients, glass, glows or page-load choreography.
+The visual foundation continues the **True-black flat** direction, taste-skill seed **1298005779**. Warm near-black surfaces use lightness for elevation; mint controls and restrained status colours establish emphasis. The interface uses no photographic hero, slogans, emoji navigation, rainbow categories, gradients, glass, glows or decorative page-load choreography. Short dialog, menu and action transitions clarify interaction and respect reduced-motion preferences.
 
 ## Tokens
 
@@ -27,11 +27,11 @@ The chart's leading segment uses the accent; remaining segments use neutral valu
 
 ## Phone layout and navigation
 
-The base stylesheet targets 320–430px phones with 16px page gutters. A compact sticky header holds Splitcount, Back within a group, and the theme control. Persistent bottom navigation offers **Grupos, Gasto, Actividad and Ajustes**, with a prominent Gasto action. Content and navigation account for the bottom safe area.
+The base stylesheet targets 320–430px phones with 16px page gutters. A compact sticky header holds Splitcount, Back within a group, and contextual group status. Persistent bottom navigation offers **Grupos, Gasto and Ajustes**, with a prominent Gasto action. Content and navigation account for the bottom safe area.
 
 Grupos uses a single column of plan cards with members, currency, local/shared status and personal balance. It does not aggregate balances across currencies. Group detail shows the title and sharing action, a compact member strip, then personal balance and group total. Below 360px those figures stack to keep whole amounts readable; from 360px they share a divided two-column band. The per-person average is reserved for desktop.
 
-The main panel has **Gastos, Saldos and Resumen** tabs. Gastos keeps search visible and opens filtering and ordering in a separate full-screen dialog. Saldos contains suggested transfers, member balances and payment history. Actividad is a separate screen spanning all groups. Ajustes contains appearance, backup, import and help.
+The main panel has **Gastos, Saldos and Resumen** tabs. Gastos keeps search visible and opens filtering and ordering in a separate full-screen dialog. Saldos contains suggested transfers, member balances and payment history. Expenses and payment history stay inside their group. Ajustes contains appearance, backup, import and help.
 
 Expense entry has two steps: **El gasto** for amount, description and payer; **El reparto** for participants and equal or exact amounts. Date, category and note are progressively revealed under Más detalles. Validation identifies and focuses the relevant field. Exact splits display the remaining amount and allow zero shares when the total still matches.
 
@@ -51,7 +51,7 @@ Panels use 10px corners and controls use 6px corners. Circles identify people. R
 
 ## Behaviour and states
 
-Dark is the default, including before React loads. A valid preference persists as `entre-theme-v1`; missing or blocked storage safely returns dark. Ajustes and the header theme button update the same preference. Dialogs, forms, native inputs, focus rings, selections and placeholders inherit the active theme.
+Dark is the default, including before React loads. A valid preference persists as `entre-theme-v1`; missing or blocked storage safely returns dark. Ajustes → Apariencia is the single location for choosing the theme. Dialogs, forms, inputs, custom listboxes, focus rings, selections and placeholders inherit the active theme. Listboxes support keyboard navigation, typeahead, Escape and outside dismissal.
 
 Navigation stores the screen and selected group in browser history. The internal `buenpar` property stays compatible across the rename, as do `entre-state-v1` and `entre-theme-v1` in browser storage. Back closes an open overlay while preserving its group, then follows screen history. Pending writes keep their dialog open. Reload restores a valid saved history route; removed groups resolve to Grupos. Invitations retain unrelated cached groups.
 
@@ -62,3 +62,7 @@ Browser rendering and interaction verification are part of the integration revie
 Google account controls live in Ajustes → Cuenta and reuse the existing button, profile, status and error vocabulary. Incorporating guest groups uses a confirmation dialog with real groups and examples separated; examples are unselected by default. Account scope is distinct from choosing a member's balance. If the Google session expires in a form, inline sign-in appears above its existing fields, retaining the draft and the same account workspace instead of dismissing the dialog.
 
 Integration review on 2026-10-27 covered browser widths of 320, 360, 390, 768 and 1440px, navigation, full-screen dialogs, exact splits, payments and persisted theme choice. A shared test group was opened in a second browser session, Ana was selected as the local identity, and a new expense of 90 appeared automatically in the first session with its balance updated. The full 144-test suite, production build and whitespace check passed. Physical-device software-keyboard behaviour remains a separate check.
+
+Group creation defaults to **Mi cuenta · sincronizado** for approved accounts, with **Este dispositivo** as an explicit alternative. New guests see an honest empty state. Creating a group or adding people offers **Guardar sin invitar** and **Crear/Guardar e invitar**. Invitations select the recipient before the channel (WhatsApp, SMS or email), with a preview and the existing shared-link permission visible. Mobbin Splitwise flows informed this sequence; no reference screenshots ship in the app.
+
+Settings includes **Tu dirección anterior → Recuperar grupos anteriores** for the custom-domain transition. The separate recovery page uses the same neutral surfaces and mint action, lists only actual stored workspaces, and exports private backups after an explicit click. It never inserts examples or sends storage contents over the network.

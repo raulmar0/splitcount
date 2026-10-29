@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Check, ChevronDown } from 'lucide-react';
 import { formatMoney, parseMoney, splitAmount } from './domain.js';
 import { moneyInput, prepareExpense, todayInMonterrey, validateExpenseDetails } from './expense-draft.js';
 import Modal from './Modal.jsx';
+import CustomSelect from './CustomSelect.jsx';
 
 const CATEGORIES = {
   food: 'Comida y bebida',
@@ -140,11 +141,12 @@ export default function ExpenseForm({ group, expense, onSave, onClose }) {
           aria-invalid={invalid('title')} aria-describedby={describedBy('title')}
           onChange={event => { setTitle(event.target.value); clearError(); }}
         /></label>
-        <label htmlFor="expense-payer">¿Quién pagó?<select
+        <label htmlFor="expense-payer">¿Quién pagó?<CustomSelect
           ref={element => { fields.current.paidBy = element; }} id="expense-payer" value={paidBy}
-          aria-invalid={invalid('paidBy')} aria-describedby={describedBy('paidBy')}
-          onChange={event => { setPaidBy(event.target.value); clearError(); }}
-        >{members.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+          aria-label="¿Quién pagó?" aria-invalid={invalid('paidBy')} aria-describedby={describedBy('paidBy')}
+          onChange={value => { setPaidBy(value); clearError(); }}
+          options={members.map(member => ({ value: member.id, label: member.name }))}
+        /></label>
         <details className="flow-details" open={detailsOpen} onToggle={event => setDetailsOpen(event.currentTarget.open)}>
           <summary><span>Más detalles</span><span className="optional">Fecha, categoría y nota</span><ChevronDown size={18} aria-hidden="true" /></summary>
           <div className="form-stack">
@@ -153,9 +155,9 @@ export default function ExpenseForm({ group, expense, onSave, onClose }) {
               aria-invalid={invalid('date')} aria-describedby={describedBy('date')}
               onChange={event => { setDate(event.target.value); clearError(); }}
             /></label>
-            <label htmlFor="expense-category">Categoría<select id="expense-category" value={category} onChange={event => { setCategory(event.target.value); clearError(); }}>
-              {Object.entries(CATEGORIES).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
-            </select></label>
+            <label htmlFor="expense-category">Categoría<CustomSelect id="expense-category" aria-label="Categoría" value={category} onChange={value => { setCategory(value); clearError(); }}
+              options={Object.entries(CATEGORIES).map(([value, label]) => ({ value, label }))}
+            /></label>
             <label htmlFor="expense-note">Nota <span className="optional">opcional</span><textarea id="expense-note" maxLength={300} rows={2} placeholder="Algo que quieras recordar" value={note} onChange={event => { setNote(event.target.value); clearError(); }} /></label>
           </div>
         </details>

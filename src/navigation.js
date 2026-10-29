@@ -1,4 +1,4 @@
-const screens = new Set(['groups', 'group', 'activity', 'settings']);
+const screens = new Set(['groups', 'group', 'settings']);
 export function resolveRoute(value, groups) {
   const route = value?.buenpar;
   if (!screens.has(route?.screen) || (route.screen === 'group' && !groups.some(group => group.id === route.groupId))) {

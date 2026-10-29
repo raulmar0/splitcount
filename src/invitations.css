@@ -1,0 +1,19 @@
+.invite-after-save { display: flex; align-items: flex-start; gap: 10px; color: var(--muted); font-size: 13px; padding: 14px; border-radius: var(--radius-control); background: var(--raised); }
+.invite-after-save svg { margin-top: 2px; color: var(--accent); }
+.invite-step-heading { display: flex; align-items: center; gap: 10px; }
+.invite-step-heading h3 { font-size: 14px; font-weight: 600; }
+.invite-step-number { display: inline-grid; place-items: center; width: 23px; height: 23px; border-radius: 50%; background: var(--raised); color: var(--muted); font-size: 12px; font-weight: 650; }
+.invite-channels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.invite-channel { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; min-height: 84px; padding: 14px 8px; border: 1px solid var(--control); border-radius: var(--radius-control); color: var(--muted); transition: background 160ms ease, color 160ms ease, border-color 160ms ease; }
+.invite-channel:hover { background: var(--raised); color: var(--text); }
+.invite-channel.selected { background: var(--selection); color: var(--selection-ink); border-color: var(--accent); }
+.invite-channel > span { font-size: 13px; font-weight: 600; }
+.invite-channel-check { position: absolute; top: 8px; right: 8px; }
+.invite-composer .field-hint { margin-top: -9px; }
+.invite-link-section { display: grid; gap: 14px; padding-top: 4px; }
+.invite-or { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+.invite-or::before, .invite-or::after { content: ''; height: 1px; background: var(--border); flex: 1; }
+.invite-prepared, .invite-saved { display: flex; gap: 8px; align-items: flex-start; color: var(--positive); font-size: 13px; }
+.invite-prepared svg, .invite-saved svg { margin-top: 1px; }
+@media (max-width: 420px) { .invite-form-actions { flex-direction: column-reverse; } .invite-form-actions .button { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .invite-channel { transition: none; } }

@@ -1,5 +1,4 @@
 import { loadState, saveState, validateState } from './domain.js';
-import { createInitialState } from './seed.js';
 import { isAccountMetadata } from './account-sync.js';
 
 export const accountStorageKey = id => `splitcount-account-v1:${id}`;
@@ -14,7 +13,7 @@ export function asGuestWorkspace(state) {
 }
 
 export function loadWorkspace(accountId, storage) {
-  if (!accountId) return asGuestWorkspace(loadState(storage) || createInitialState());
+  if (!accountId) return asGuestWorkspace(loadState(storage) || emptyState());
   try {
     const data = JSON.parse((storage ?? globalThis.localStorage).getItem(accountStorageKey(accountId)));
     if (validAccountWorkspace(data)) return data;

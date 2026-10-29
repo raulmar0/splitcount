@@ -14,7 +14,8 @@ export default function Modal({ title, subtitle, children, onClose, wide = false
   useEffect(() => {
     const dialog = ref.current;
     dialog.showModal();
-    dialog.querySelector('input:not([type="checkbox"])')?.focus();
+    dialog.querySelector('input:not([type="checkbox"])')?.focus({ preventScroll: true });
+    dialog.scrollTop = 0;
     const cancel = (e) => { e.preventDefault(); if (!disabledRef.current) closeRef.current(); };
     dialog.addEventListener('cancel', cancel);
     return () => { dialog.removeEventListener('cancel', cancel); dialog.close(); };
