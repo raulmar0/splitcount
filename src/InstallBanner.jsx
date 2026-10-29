@@ -1,8 +1,10 @@
+import { useI18n } from './i18n.jsx';
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { almacenamiento, avisoCerrado, avisoPara, cerrarAviso, instaladaAhora, plataformaActual } from './pwa.js';
 
 export default function InstallBanner() {
+  const { t } = useI18n();
   const [plataforma] = useState(plataformaActual);
   const [instalada, setInstalada] = useState(instaladaAhora);
   const [cerrado, setCerrado] = useState(() => avisoCerrado(almacenamiento()));
@@ -49,10 +51,10 @@ export default function InstallBanner() {
     cerrarAviso(almacenamiento());
   }
 
-  return <section className="pwa-banner" aria-label={aviso.titulo}>
+  return <section className="pwa-banner" aria-label={t(aviso.titulo)}>
     <img className="brand-image" src={`${import.meta.env.BASE_URL}brand/splitcount-symbol.png`} alt="" width="40" height="40" />
-    <div className="pwa-banner-copy"><strong>{aviso.titulo}</strong><span>{aviso.texto}</span></div>
-    {peticion && <button type="button" className="button primary" onClick={instalar} disabled={instalando}>Instalar</button>}
-    <button type="button" className="icon-button" aria-label="Ahora no" onClick={descartar}><X size={16} /></button>
+    <div className="pwa-banner-copy"><strong>{t(aviso.titulo)}</strong><span>{t(aviso.texto)}</span></div>
+    {peticion && <button type="button" className="button primary" onClick={instalar} disabled={instalando}>{t("Instalar")}</button>}
+    <button type="button" className="icon-button" aria-label={t("Ahora no")} onClick={descartar}><X size={16} /></button>
   </section>;
 }

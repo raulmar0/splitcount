@@ -1,6 +1,6 @@
 # Splitcount
 
-Splitcount is a Spanish-language app for splitting expenses among friends, households and travel groups. People create a group, name its members, record who paid, divide an expense equally or by exact amounts, review balances and register payments made outside the app. Splitcount tracks the ledger; it does not transfer money.
+Splitcount is an app available in Spanish, English, French, Portuguese and Italian for splitting expenses among friends, households and travel groups. People create a group, name its members, record who paid, divide an expense equally or by exact amounts, review balances and register payments made outside the app. Splitcount tracks the ledger; it does not transfer money.
 
 ## Phone-first tasks
 
@@ -8,9 +8,9 @@ The app starts at **Grupos**, a list of plans with members, currency and the cur
 
 The phone and tablet navigation keeps **Grupos, Gasto and Ajustes** within reach. Gasto uses the open group or asks which group to use from another screen. Expense and payment history stays inside each group. Ajustes holds theme selection, JSON backup and restore, and help.
 
-Within a group, the group name is the page title. Personal balance and group total lead into **Gastos, Saldos and Resumen**. Suggested transfers and recorded payments belong in Saldos on phones. Search, category filtering, ordering, expense editing and deletion, and CSV export remain available. Wider desktop layouts add named groups in a sidebar, a transfer column and the per-person average.
+Within a group, the group name is the page title. Personal balance and group total lead into **Gastos and Saldos**. Suggested transfers and recorded payments belong in Saldos on phones. Search, category filtering, ordering, expense editing and deletion, and CSV export remain available. Wider desktop layouts add named groups in a sidebar, a transfer column and the per-person average.
 
-Recording an expense has two steps: amount, description and payer, followed by participants and the split. Date, category and note appear under **Más detalles**. Forms fill the phone viewport; larger screens use bounded dialogs. The expense action footer stays visible within the scrolling dialog. A form keeps its original group and draft while shared data refreshes. Remote saves wait for acceptance; failures keep the draft and show an error.
+Recording an expense uses one form: amount, description and payer, then optional details followed by “¿Para quién?” for participants and the equal or exact split. Date, category and note appear under **Más detalles**. Forms fill the phone viewport; larger screens use bounded dialogs. The expense action footer stays visible within the scrolling dialog. A form keeps its original group and draft while shared data refreshes. Remote saves wait for acceptance; failures keep the draft and show an error.
 
 Browser Back closes an open overlay before changing screens, preserving the form's group. Pending writes prevent dismissal until the result is known. Without an overlay, Back follows in-app history; reload restores a valid history route. An invitation opens its group while retaining unrelated groups.
 
@@ -51,3 +51,7 @@ Success means a person can enter an expense from their phone, share its group, i
 ## Moving to the custom domain
 
 Account groups recover through Google. Browser-local work stays in its previous origin. Settings links to a separate static recovery page on `raulmar0.github.io/splitcount-recovery/`, which previews prior guest groups and local-only account groups, then exports one private JSON backup per workspace on explicit click. It never sends these copies over the network or deletes the old storage. People import that backup using the existing flow on the new domain.
+
+## Language preference
+
+Settings offers System (default), Español, English, Français, Português and Italiano. System resolves the first supported browser language and falls back to Spanish. Explicit selection persists locally under `splitcount-language-v1`; stored ledger content and currency codes remain unchanged. Dates and money use Intl formatting for the selected language.

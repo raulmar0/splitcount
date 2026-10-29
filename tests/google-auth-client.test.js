@@ -280,7 +280,7 @@ test('SDK loading is shared, handles errors/timeouts, and can retry without dupl
   const first = loadGoogleIdentity();
   assert.equal(loadGoogleIdentity(), first);
   assert.equal(scripts.length, 1);
-  assert.equal(scripts[0].src, 'https://accounts.google.com/gsi/client');
+  assert.equal(scripts[0].src, 'https://accounts.google.com/gsi/client?hl=es');
   scripts[0].onerror();
   await assert.rejects(first, /conectar con Google/);
   assert.equal(scripts[0].removed, true);
@@ -297,4 +297,57 @@ test('SDK loading is shared, handles errors/timeouts, and can retry without dupl
   scripts[2].onload();
   assert.equal(await retry, sdk);
   assert.equal(await loadGoogleIdentity(), sdk);
+});
+
+test('SDK loading requests the selected language and reuses only a matching loaded locale', async () => {
+  const { loadGoogleIdentity: load } = await import('../src/google-auth.js?locale-cache-test');
+  delete globalThis.google;
+  const scripts = [];
+  globalThis.document = {
+    createElement() { return { remove() { this.removed = true; } }; },
+    head: { appendChild(script) { scripts.push(script); } },
+  };
+  const first = load('en');
+  assert.equal(load('en'), first);
+  assert.equal(scripts[0].src, 'https://accounts.google.com/gsi/client?hl=en');
+  const englishSdk = { language: 'en' };
+  globalThis.google = { accounts: { id: englishSdk } };
+  scripts[0].onload();
+  assert.equal(await first, englishSdk);
+  assert.equal(await load('en'), englishSdk);
+  assert.equal(scripts.length, 1);
+  const french = load('fr');
+  assert.equal(scripts.length, 2);
+  assert.equal(scripts[0].removed, true);
+  assert.equal(scripts[1].src, 'https://accounts.google.com/gsi/client?hl=fr');
+  const frenchSdk = { language: 'fr' };
+  globalThis.google.accounts.id = frenchSdk;
+  scripts[1].onload();
+  assert.equal(await french, frenchSdk);
+});
+
+test('rapid locale changes serialize SDK execution and a stale failure cannot discard the latest request', async () => {
+  const { loadGoogleIdentity: load } = await import('../src/google-auth.js?locale-race-test');
+  delete globalThis.google;
+  const scripts = [];
+  globalThis.document = {
+    createElement() { return { remove() { this.removed = true; } }; },
+    head: { appendChild(script) { scripts.push(script); } },
+  };
+  const french = load('fr');
+  const italian = load('it');
+  assert.equal(load('it'), italian);
+  assert.equal(scripts.length, 1);
+  scripts[0].onerror();
+  await assert.rejects(french, /conectar con Google/);
+  await Promise.resolve();
+  assert.equal(scripts.length, 2);
+  assert.equal(scripts[1].src, 'https://accounts.google.com/gsi/client?hl=it');
+  assert.equal(load('it'), italian);
+  const sdk = { language: 'it' };
+  globalThis.google = { accounts: { id: sdk } };
+  scripts[1].onload();
+  assert.equal(await italian, sdk);
+  assert.equal(await load('it'), sdk);
+  assert.equal(scripts.filter(script => !script.removed).length, 1);
 });

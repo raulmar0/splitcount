@@ -31,9 +31,9 @@ The base stylesheet targets 320–430px phones with 16px page gutters. A compact
 
 Grupos uses a single column of plan cards with members, currency, local/shared status and personal balance. It does not aggregate balances across currencies. Group detail shows the title and sharing action, a compact member strip, then personal balance and group total. Below 360px those figures stack to keep whole amounts readable; from 360px they share a divided two-column band. The per-person average is reserved for desktop.
 
-The main panel has **Gastos, Saldos and Resumen** tabs. Gastos keeps search visible and opens filtering and ordering in a separate full-screen dialog. Saldos contains suggested transfers, member balances and payment history. Expenses and payment history stay inside their group. Ajustes contains appearance, backup, import and help.
+The main panel has **Gastos and Saldos** tabs. Gastos keeps search visible and opens filtering and ordering in a separate full-screen dialog. Saldos contains suggested transfers, member balances and payment history. Expenses and payment history stay inside their group. Ajustes contains appearance, backup, import and help.
 
-Expense entry has two steps: **El gasto** for amount, description and payer; **El reparto** for participants and equal or exact amounts. Date, category and note are progressively revealed under Más detalles. Validation identifies and focuses the relevant field. Exact splits display the remaining amount and allow zero shares when the total still matches.
+Expense entry uses one continuous form: amount, description and payer, optional details, then **¿Para quién?** for participants and equal or exact amounts. There are no step headers. The amount uses an open field with a focused baseline instead of a rectangular outline. Date, category and note are progressively revealed under Más detalles. Validation identifies and focuses the relevant field. Exact splits display the remaining amount and allow zero shares when the total still matches.
 
 ## Progressive enhancements
 
@@ -66,3 +66,7 @@ Integration review on 2026-10-27 covered browser widths of 320, 360, 390, 768 an
 Group creation defaults to **Mi cuenta · sincronizado** for approved accounts, with **Este dispositivo** as an explicit alternative. New guests see an honest empty state. Creating a group or adding people offers **Guardar sin invitar** and **Crear/Guardar e invitar**. Invitations select the recipient before the channel (WhatsApp, SMS or email), with a preview and the existing shared-link permission visible. Mobbin Splitwise flows informed this sequence; no reference screenshots ship in the app.
 
 Settings includes **Tu dirección anterior → Recuperar grupos anteriores** for the custom-domain transition. The separate recovery page uses the same neutral surfaces and mint action, lists only actual stored workspaces, and exports private backups after an explicit click. It never inserts examples or sends storage contents over the network.
+
+## Interface refinements, 2026-10-28
+
+Grupos and Ajustes retain the same resting bottom-navigation appearance; Gasto carries the mint emphasis. aria-current still identifies the current page. Identity selection omits explanatory subtitles and persistence hints. Group descriptions show only actual group content, and the Summary tab is removed. Optional fields and exact shares use short, action-triggered transitions; reduced motion suppresses movement. Settings adds a system/manual language selector with five languages and locale-aware money and dates. Native iOS keyboard accessory controls remain browser-owned; name fields opt out of contact autofill.

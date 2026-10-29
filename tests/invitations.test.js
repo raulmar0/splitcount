@@ -48,3 +48,12 @@ test('only newly added people are offered an invitation, excluding the current p
   assert.deepEqual(newInvitees(original), ['ana']);
   assert.deepEqual(newInvitees(next, [], 'bea'), ['you', 'ana', 'car']);
 });
+
+test('translated invitations retain the chosen language and exact private link in every channel', () => {
+  const translated = { ...invitation, message: `Bonjour, María. Rejoignez « Cena & amigos » : ${link}`, subject: 'Invitation à Cena & amigos sur Splitcount' };
+  for (const channel of ['email', 'sms', 'whatsapp']) {
+    const url = new URL(invitationHref(channel, channel === 'email' ? 'maria@example.com' : '+528112345678', translated));
+    assert.equal(url.searchParams.get(channel === 'whatsapp' ? 'text' : 'body'), translated.message);
+    if (channel === 'email') assert.equal(url.searchParams.get('subject'), translated.subject);
+  }
+});

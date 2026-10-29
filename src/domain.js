@@ -1,3 +1,5 @@
+import { getLocale } from './i18n.js';
+
 const MAX_AMOUNT = 10_000_000_000;
 
 const isId = (value) => typeof value === 'string' && value.trim().length > 0;
@@ -145,14 +147,18 @@ export function saveState(state, storage) {
 /** Parse an ungrouped decimal amount without floating-point multiplication. */
 export function parseMoney(input) {
   if (typeof input !== 'string') return null;
-  const match = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(input.trim());
+  let normalized = input.trim();
+  if (getLocale() === 'fr-FR' && /^\d{1,3}(?:[ \u00a0\u202f]\d{3})+(?:[.,]\d{1,2})?$/.test(normalized)) {
+    normalized = normalized.replace(/[ \u00a0\u202f]/g, '');
+  }
+  const match = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(normalized);
   if (!match) return null;
   const cents = Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0'));
   return isCents(cents) ? cents : null;
 }
 
 export function formatMoney(cents, currency = 'MXN') {
-  return new Intl.NumberFormat('es-MX', {
+  return new Intl.NumberFormat(getLocale(), {
     style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(cents / 100);
 }

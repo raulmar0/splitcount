@@ -1,27 +1,62 @@
 import { SYNC_API } from './sync.js';
 
-let scriptPromise;
+let activeLoad;
+let loadedLanguage;
+let scriptElement;
 
-export function loadGoogleIdentity() {
-  if (globalThis.google?.accounts?.id) return Promise.resolve(globalThis.google.accounts.id);
-  if (!scriptPromise) {
-    scriptPromise = new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      const finish = error => {
-        clearTimeout(timer);
-        script.onload = script.onerror = null;
-        if (error) { script.remove(); reject(error); }
-        else resolve(globalThis.google.accounts.id);
-      };
-      const timer = setTimeout(() => finish(new Error('Google está tardando en responder. Comprueba tu conexión y vuelve a intentarlo.')), 12000);
-      script.src = 'https://accounts.google.com/gsi/client';
-      script.async = true;
-      script.onload = () => finish(globalThis.google?.accounts?.id ? null : new Error('No se pudo cargar el acceso con Google. Vuelve a intentarlo.'));
-      script.onerror = () => finish(new Error('No se pudo conectar con Google. Comprueba tu conexión o el bloqueador del navegador.'));
-      document.head.appendChild(script);
-    }).catch(error => { scriptPromise = null; throw error; });
+function insertIdentityScript(language) {
+  return new Promise((resolve, reject) => {
+    // Keep a single owned script; the initialized SDK and active credentials stay in memory.
+    scriptElement?.remove();
+    const script = document.createElement('script');
+    scriptElement = script;
+    let settled = false;
+    const finish = error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      script.onload = script.onerror = null;
+      if (error) {
+        script.remove();
+        if (scriptElement === script) scriptElement = null;
+        reject(error);
+      } else {
+        loadedLanguage = language;
+        resolve(globalThis.google.accounts.id);
+      }
+    };
+    const timer = setTimeout(() => finish(new Error('Google está tardando en responder. Comprueba tu conexión y vuelve a intentarlo.')), 12000);
+    script.src = `https://accounts.google.com/gsi/client?hl=${language}`;
+    script.async = true;
+    script.onload = () => finish(globalThis.google?.accounts?.id ? null : new Error('No se pudo cargar el acceso con Google. Vuelve a intentarlo.'));
+    script.onerror = () => finish(new Error('No se pudo conectar con Google. Comprueba tu conexión o el bloqueador del navegador.'));
+    document.head.appendChild(script);
+  });
+}
+
+export function loadGoogleIdentity(locale = 'es') {
+  const requested = String(locale).toLowerCase().split(/[-_]/)[0];
+  const language = ['es', 'en', 'fr', 'pt', 'it'].includes(requested) ? requested : 'es';
+  if (activeLoad?.language === language) return activeLoad.promise;
+  if (!activeLoad && loadedLanguage === language && globalThis.google?.accounts?.id) {
+    return Promise.resolve(globalThis.google.accounts.id);
   }
-  return scriptPromise;
+  const previous = activeLoad;
+  const request = { language };
+  // Loading different SDK locales concurrently can let a slower old script win.
+  // Serialize them, while same-language callers share the current request.
+  const loading = previous
+    ? previous.promise.catch(() => {}).then(() => insertIdentityScript(language))
+    : insertIdentityScript(language);
+  request.promise = loading.then(sdk => {
+    if (activeLoad === request) activeLoad = null;
+    return sdk;
+  }, error => {
+    if (activeLoad === request) activeLoad = null;
+    throw error;
+  });
+  activeLoad = request;
+  return request.promise;
 }
 
 export async function verifyGoogleCredential(credential, { fetcher = globalThis.fetch, base = SYNC_API, signal = AbortSignal.timeout(12000) } = {}) {

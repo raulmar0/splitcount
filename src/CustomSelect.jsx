@@ -1,3 +1,4 @@
+import { useI18n } from './i18n.jsx';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import useSelectController from './useSelectController.js';
@@ -6,6 +7,7 @@ import './custom-select.css';
 // The popup stays inside its dialog's top layer while fixed positioning avoids
 // clipping by the form's scrolling container. Focus remains on the combobox.
 export default function CustomSelect({ value, onChange, options, id, disabled = false, className = '', ref, ...aria }) {
+  const { t, locale } = useI18n();
   const generatedId = useId();
   const controlId = id || `select-${generatedId}`;
   const listId = `${controlId}-options`;
@@ -21,7 +23,7 @@ export default function CustomSelect({ value, onChange, options, id, disabled = 
     if (!label) return;
     const text = [...label.childNodes].filter(node => node !== root.current).map(node => node.textContent).join(' ').trim();
     setImplicitLabel(text);
-  }, [aria['aria-label'], aria['aria-labelledby']]);
+  }, [aria['aria-label'], aria['aria-labelledby'], locale]);
 
   useLayoutEffect(() => {
     if (!control.open) return;
@@ -78,8 +80,8 @@ export default function CustomSelect({ value, onChange, options, id, disabled = 
       {...aria} aria-label={aria['aria-label'] || implicitLabel || undefined}
       disabled={disabled || !options.some(option => !option.disabled)}
       className="custom-select-trigger" onClick={control.toggle} onKeyDown={control.onKeyDown}
-    ><span>{control.selected?.label || 'Seleccionar'}</span><ChevronDown size={17} aria-hidden="true" /></button>
-    {control.open && <span ref={popup} id={listId} role="listbox" aria-label={aria['aria-label'] || implicitLabel || 'Opciones'} className="custom-select-popup" style={position || { visibility: 'hidden' }}>
+    ><span>{control.selected?.label || t("Seleccionar")}</span><ChevronDown size={17} aria-hidden="true" /></button>
+    {control.open && <span ref={popup} id={listId} role="listbox" aria-label={aria['aria-label'] || implicitLabel || t("Opciones")} className="custom-select-popup" style={position || { visibility: 'hidden' }}>
       {options.map((option, index) => <span
         key={option.value} id={optionId(index)} role="option" data-option-index={index}
         aria-selected={option.value === value} aria-disabled={option.disabled || undefined}

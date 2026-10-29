@@ -1,6 +1,6 @@
 # Splitcount — gastos entre amigos
 
-Una app en español para repartir gastos de viajes, hogares y planes con amigos. Diseñada desde el teléfono: crea grupos, añade gastos en dos pasos, consulta balances y registra pagos para saldar cuentas.
+Una app en español, inglés, francés, portugués e italiano para repartir gastos de viajes, hogares y planes con amigos. Diseñada desde el teléfono: crea grupos, añade gastos en un formulario, consulta balances y registra pagos para saldar cuentas.
 
 ## Desarrollo local
 
@@ -34,8 +34,8 @@ Las actualizaciones se preparan en segundo plano y se activan al cerrar todas la
 
 - **Grupos** es el inicio: cada plan muestra integrantes, moneda y saldo personal. Cada saldo conserva su moneda; no se suman monedas diferentes. En un grupo compartido sin identidad elegida se pide seleccionar un nombre.
 - La navegación inferior en teléfono y tablet ofrece **Grupos, Gasto y Ajustes**. Desde Gasto puedes elegir un grupo; dentro de uno, el gasto se registra allí.
-- El formulario de gasto tiene dos pasos: importe, descripción y quién pagó; después, reparto por igual o por importes exactos. Fecha, categoría y nota se despliegan en **Más detalles**.
-- El detalle del grupo contiene **Gastos, Saldos y Resumen**. Incluye edición y eliminación de gastos, búsqueda, filtros, orden y desglose por categoría. En teléfono, filtros y formularios abren una vista a pantalla completa; las transferencias sugeridas están en Saldos.
+- El formulario de gasto reúne importe, descripción, quién pagó y reparto. Después de **Más detalles**, **¿Para quién?** permite elegir integrantes y dividir por igual o por importes exactos. Fecha, categoría y nota siguen siendo opcionales.
+- El detalle del grupo contiene **Gastos y Saldos**. Incluye edición y eliminación de gastos, búsqueda, filtros y orden. En teléfono, filtros y formularios abren una vista a pantalla completa; las transferencias sugeridas están en Saldos.
 - Balances por persona y sugerencias para saldar cuentas. Los importes se calculan en centavos enteros; no se convierten monedas.
 - Registro de pagos: anotar un pago solo actualiza las cuentas. **Splitcount no realiza transferencias de dinero.**
 - Los gastos y pagos se consultan dentro de cada grupo. Ajustes contiene apariencia, cuenta, respaldo e importación. En escritorio aparecen la barra lateral de grupos y una columna de transferencias.
@@ -53,6 +53,8 @@ Los grupos en línea se guardan en un servicio persistente de Cloudflare con un 
 En **Ajustes → Tus datos**, exporta una copia JSON para respaldar o trasladar todos tus datos. **Incluye las claves de los grupos compartidos: guárdala como una copia privada.** La importación se valida antes de reemplazar la copia local. El CSV exporta gastos del grupo para análisis y no reemplaza al respaldo JSON. Las nuevas descargas usan nombres `splitcount-respaldo.json` y `splitcount-<grupo>.csv`.
 
 El tema inicial es oscuro. Puedes elegir claro u oscuro en **Ajustes → Apariencia**. La preferencia se guarda en este navegador y se aplica antes de cargar React.
+
+En **Ajustes → Idioma**, elige **Sistema** (opción inicial), **Español**, **English**, **Français**, **Português** o **Italiano**. Sistema toma el primer idioma compatible de las preferencias del navegador y usa español si ninguno coincide. La elección se guarda en este dispositivo con `splitcount-language-v1`; cambia la interfaz y los formatos de fecha e importe sin modificar nombres, notas, monedas ni datos guardados. El autocompletado de contacto se desactiva en los campos de nombre; la barra nativa del teclado depende de Safari/iOS.
 ## Límites de grupos
 
 - **Sin cuenta:** grupos locales ilimitados y hasta **1 grupo compartido** en el espacio invitado de este navegador.
