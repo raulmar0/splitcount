@@ -7,38 +7,49 @@ const isRecord = value => value !== null && typeof value === 'object' && !Array.
 const base64url = value => btoa(String.fromCharCode(...new Uint8Array(value))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 
 export class PushValidationError extends Error {
-  constructor() {
-    super('La suscripción de notificaciones no es válida.');
+  constructor(message = 'La suscripción de notificaciones no es válida.') {
+    super(message);
     this.name = 'PushValidationError';
     this.status = 400;
     this.code = 'invalid_push_subscription';
   }
 }
 
-const invalid = () => { throw new PushValidationError(); };
+export class PushDeliveryError extends Error {
+  constructor(status = null) {
+    super('No se pudo enviar la notificación.');
+    this.name = 'PushDeliveryError';
+    this.status = Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+  }
+}
+
+const invalid = message => { throw new PushValidationError(message); };
+const invalidKey = () => invalid('Las claves de notificaciones de este navegador no son válidas.');
 
 function decodeKey(value, size) {
-  if (typeof value !== 'string' || value.length !== Math.ceil(size * 8 / 6) || !/^[A-Za-z0-9_-]+$/.test(value)) invalid();
+  if (typeof value !== 'string' || value.length !== Math.ceil(size * 8 / 6) || !/^[A-Za-z0-9_-]+$/.test(value)) invalidKey();
   let decoded;
   try {
     decoded = Uint8Array.from(atob(value.replaceAll('-', '+').replaceAll('_', '/')), character => character.charCodeAt(0));
-  } catch { invalid(); }
-  if (decoded.length !== size || base64url(decoded) !== value) invalid();
+  } catch { invalidKey(); }
+  if (decoded.length !== size || base64url(decoded) !== value) invalidKey();
   return decoded;
 }
 
 function validateP256(bytes) {
-  if (bytes[0] !== 4) invalid();
+  if (bytes[0] !== 4) invalidKey();
   const integer = value => value.reduce((number, byte) => number * 256n + BigInt(byte), 0n);
   const x = integer(bytes.subarray(1, 33));
   const y = integer(bytes.subarray(33));
-  if (x >= P256_PRIME || y >= P256_PRIME) invalid();
+  if (x >= P256_PRIME || y >= P256_PRIME) invalidKey();
   const right = ((x * x * x - 3n * x + P256_B) % P256_PRIME + P256_PRIME) % P256_PRIME;
-  if (y * y % P256_PRIME !== right) invalid();
+  if (y * y % P256_PRIME !== right) invalidKey();
 }
 
 function trustedHost(hostname) {
   return hostname === 'fcm.googleapis.com'
+    // Chromium's documented staging GCM service; never allow arbitrary Google hosts.
+    || hostname === 'jmt17.google.com'
     || hostname === 'push.services.mozilla.com' || hostname.endsWith('.push.services.mozilla.com')
     || hostname === 'web.push.apple.com' || hostname.endsWith('.web.push.apple.com')
     || hostname.endsWith('.notify.windows.com');
@@ -50,10 +61,11 @@ export function validatePushSubscription(value) {
     || value.endpoint.length > 4096 || /[\u0000-\u0020\u007f\\]/.test(value.endpoint)) invalid();
   let endpoint;
   try { endpoint = new URL(value.endpoint); } catch { invalid(); }
-  if (endpoint.protocol !== 'https:' || !trustedHost(endpoint.hostname) || endpoint.port
+  if (endpoint.protocol !== 'https:' || endpoint.port
     || endpoint.username || endpoint.password || endpoint.hash) invalid();
+  if (!trustedHost(endpoint.hostname)) invalid(`El proveedor de notificaciones ${endpoint.hostname.slice(0, 150)} no está admitido.`);
   const expirationTime = value.expirationTime ?? null;
-  if (expirationTime !== null && (!Number.isSafeInteger(expirationTime) || expirationTime < 0)) invalid();
+  if (expirationTime !== null && (!Number.isSafeInteger(expirationTime) || expirationTime < 0)) invalid('El vencimiento de la suscripción de notificaciones no es válido.');
   validateP256(decodeKey(value.keys.p256dh, 65));
   decodeKey(value.keys.auth, 16);
   return { endpoint: endpoint.href, expirationTime, keys: { p256dh: value.keys.p256dh, auth: value.keys.auth } };
@@ -84,6 +96,7 @@ export async function getPushConfig(storage) {
 /** RFC 8292 VAPID authentication; an empty body sends no account or applicant data. */
 export async function sendAdminPush(subscription, config, { fetcher = globalThis.fetch } = {}) {
   const { endpoint } = validatePushSubscription(subscription);
+  let response;
   try {
     const key = await crypto.subtle.importKey('jwk', config.privateJwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
     const header = base64url(encoder.encode(JSON.stringify({ typ: 'JWT', alg: 'ES256' })));
@@ -94,16 +107,19 @@ export async function sendAdminPush(subscription, config, { fetcher = globalThis
     })));
     const input = `${header}.${payload}`;
     const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, encoder.encode(input));
-    const response = await fetcher(endpoint, {
+    response = await fetcher(endpoint, {
       method: 'POST',
       headers: { TTL: '300', 'Content-Length': '0', Authorization: `vapid t=${input}.${base64url(signature)}, k=${config.publicKey}` },
-      redirect: 'error',
+      // Workers rejects redirect:"error" before sending; manual keeps credentials
+      // on the validated endpoint and the status checks below reject every 3xx.
+      redirect: 'manual',
       signal: AbortSignal.timeout(5000),
     });
-    if (response.status === 404 || response.status === 410) return { expired: true };
-    if (response.ok) return { expired: false };
   } catch {
     // Fetch errors can contain the full subscription URL, which is a capability secret.
+    throw new PushDeliveryError();
   }
-  throw new Error('No se pudo enviar la notificación.');
+  if (response.status === 404 || response.status === 410) return { expired: true };
+  if (response.ok) return { expired: false };
+  throw new PushDeliveryError(response.status);
 }

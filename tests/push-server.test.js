@@ -55,6 +55,7 @@ test('accepts browser push services and retains opaque endpoint paths and querie
   const { validatePushSubscription } = await loadPush();
   for (const endpoint of [
     'https://fcm.googleapis.com/fcm/send/ABC_123',
+    'https://jmt17.google.com/fcm/send/ABC_123',
     'https://updates.push.services.mozilla.com/wpush/v2/token',
     'https://updates-autopush.stage.mozaws.net.push.services.mozilla.com/wpush/v2/token',
     'https://web.push.apple.com/QToken',
@@ -75,6 +76,7 @@ test('rejects endpoints that could send credentials to an untrusted host or port
     'http://fcm.googleapis.com/token', 'https://fcm.googleapis.com:8443/token',
     'https://user:secret@fcm.googleapis.com/token', 'https://fcm.googleapis.com/token#fragment',
     'https://fcm.googleapis.com.evil.example/token', 'https://evil-fcm.googleapis.com/token',
+    'https://jmt17.google.com.evil.example/token', 'https://eviljmt17.google.com/token', 'https://jmt18.google.com/token',
     'https://evilpush.services.mozilla.com/token', 'https://push.services.mozilla.com.evil.example/token',
     'https://evilweb.push.apple.com/token', 'https://web.push.apple.com.evil.example/token',
     'https://evilnotify.windows.com/token', 'https://notify.windows.com/token',
@@ -112,6 +114,21 @@ test('rejects malformed subscription keys and invalid expiration values', async 
   }
 });
 
+test('subscription diagnostics identify incompatible fields without exposing device keys or endpoint paths', async () => {
+  const { validatePushSubscription } = await loadPush();
+  assert.throws(() => validatePushSubscription(subscription('https://unsupported.example/private-capability')), error => {
+    assert.match(error.message, /proveedor.*unsupported\.example/i);
+    assert.doesNotMatch(error.message, /private-capability/);
+    return true;
+  });
+  assert.throws(() => validatePushSubscription({ ...subscription(), expirationTime: 'invalid' }), /vencimiento/);
+  assert.throws(() => validatePushSubscription({ ...subscription(), keys: { p256dh, auth: 'private-key' } }), error => {
+    assert.match(error.message, /claves/);
+    assert.doesNotMatch(error.message, /private-key/);
+    return true;
+  });
+});
+
 test('sends an empty push request with a verifiable VAPID token and never follows redirects', async () => {
   const { getPushConfig, sendAdminPush } = await loadPush();
   const config = await getPushConfig(storageFor());
@@ -131,7 +148,7 @@ test('sends an empty push request with a verifiable VAPID token and never follow
   assert.deepEqual(result, { expired: false });
   assert.equal(request.url, endpoint);
   assert.equal(request.method, 'POST');
-  assert.equal(request.redirect, 'error');
+  assert.equal(request.redirect, 'manual');
   assert.equal(await request.text(), '');
   assert.equal(request.body, null);
   assert.equal(request.headers.get('Content-Encoding'), null);
@@ -153,18 +170,42 @@ test('sends an empty push request with a verifiable VAPID token and never follow
 });
 
 test('reports expired subscriptions separately from successful and failed deliveries', async () => {
-  const { getPushConfig, sendAdminPush } = await loadPush();
+  const { getPushConfig, sendAdminPush, PushDeliveryError } = await loadPush();
   const config = await getPushConfig(storageFor());
   for (const status of [200, 201, 202, 204, 299, 404, 410]) {
     assert.deepEqual(await sendAdminPush(subscription(), config, { fetcher: async () => new Response(null, { status }) }), { expired: status === 404 || status === 410 });
   }
   for (const status of [301, 307, 400, 401, 403, 429, 500]) {
-    await assert.rejects(sendAdminPush(subscription(), config, { fetcher: async () => new Response(null, { status }) }));
+    const response = new Response('private provider response body', { status });
+    await assert.rejects(sendAdminPush(subscription(), config, { fetcher: async () => response }), error => {
+      assert.equal(error.name, 'PushDeliveryError');
+      assert.ok(error instanceof PushDeliveryError);
+      assert.equal(error.status, status);
+      assert.doesNotMatch(JSON.stringify(error), /private|fcm\.googleapis\.com|p256dh|auth/);
+      assert.doesNotMatch(error.message, /private|fcm\.googleapis\.com/);
+      return true;
+    });
+    assert.equal(response.bodyUsed, false);
   }
   await assert.rejects(sendAdminPush(subscription(), config, { fetcher: async () => { throw new Error('private-device-token in network exception'); } }), error => {
+    assert.ok(error instanceof PushDeliveryError);
+    assert.equal(error.status, null);
     assert.equal(error.message.includes('private-device-token'), false);
+    assert.equal(error.cause, undefined);
     return true;
   });
+});
+
+test('uses the Workers-compatible manual redirect mode and rejects redirected push delivery', async () => {
+  const { getPushConfig, sendAdminPush } = await loadPush();
+  const config = await getPushConfig(storageFor());
+  let requests = 0;
+  await assert.rejects(sendAdminPush(subscription(), config, { fetcher: async (_endpoint, options) => {
+    requests++;
+    assert.equal(options.redirect, 'manual');
+    return new Response(null, { status: 302, headers: { Location: 'https://untrusted.example/' } });
+  } }), { status: 302 });
+  assert.equal(requests, 1);
 });
 
 test('revalidates persisted subscriptions before invoking the push service', async () => {
@@ -176,7 +217,7 @@ test('revalidates persisted subscriptions before invoking the push service', asy
 });
 
 test('sanitizes a delivery timeout without exposing the subscription capability', async () => {
-  const { getPushConfig, sendAdminPush } = await loadPush();
+  const { getPushConfig, sendAdminPush, PushDeliveryError } = await loadPush();
   const config = await getPushConfig(storageFor());
   let deliverySignal;
   await assert.rejects(sendAdminPush(subscription(), config, {
@@ -185,7 +226,9 @@ test('sanitizes a delivery timeout without exposing the subscription capability'
       throw new DOMException(`${url}: private timeout details`, 'TimeoutError');
     },
   }), error => {
-    assert.equal(error.name, 'Error');
+    assert.equal(error.name, 'PushDeliveryError');
+    assert.ok(error instanceof PushDeliveryError);
+    assert.equal(error.status, null);
     assert.equal(error.message.includes('fcm.googleapis.com'), false);
     assert.equal(error.message.includes('private'), false);
     return true;

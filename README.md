@@ -106,6 +106,8 @@ El flujo [pages.yml](.github/workflows/pages.yml) instala las dependencias del f
 
 Para publicar la sincronización de cuentas, despliega primero el Worker con el nuevo binding `ACCOUNTS` y el export `AccountDirectory`, sin reemplazar `GROUPS` ni `GroupLedger`; después publica el frontend. Los pasos y límites están en `sync-server/README.md`.
 
+Publicación 1.1.0 verificada el 28 de octubre de 2026: frontend y Worker activos, cupos de 1 y 6 comprobados contra producción, aprobación y revocación probadas con una segunda cuenta, y aviso push recibido y abierto correctamente. Si mantienes una pestaña o la app antigua abierta, ciérrala y vuelve a abrirla para activar la actualización sin perder tus grupos.
+
 Enlaces:
 
 - Repositorio: [raulmar0/splitcount](https://github.com/raulmar0/splitcount).

@@ -220,6 +220,139 @@ test('push failures do not lose pending requests or trigger retries on the next 
   assert.equal(pushes.length, 2);
 });
 
+test('manual push tests with no devices report empty diagnostics without generating keys or sending', async () => {
+  const api = service();
+  pushes = [];
+  const result = await api.admin('/admin/push/test', { method: 'POST' });
+  assert.equal(result.response.status, 200);
+  assert.deepEqual(result.data, { sent: 0, expired: 0, failed: 0, errors: [] });
+  assert.equal(pushes.length, 0);
+  assert.equal(api.data.size, 0);
+});
+
+test('manual push tests report safe provider failures and prune only expired devices', async () => {
+  const api = service();
+  const devices = [
+    subscription('https://fcm.googleapis.com/fcm/send/private-success'),
+    subscription('https://web.push.apple.com/private-expired'),
+    subscription('https://jmt17.google.com/fcm/send/private-failure?secret=capability'),
+    subscription('https://updates.push.services.mozilla.com/wpush/v2/private-network'),
+  ];
+  for (const device of devices) await api.admin('/admin/push', { method: 'POST', body: { subscription: device } });
+  const before = structuredClone(api.data.get('access-registry'));
+  pushResponder = url => {
+    const provider = new URL(url).hostname;
+    if (provider === 'web.push.apple.com') return new Response(null, { status: 410 });
+    if (provider === 'jmt17.google.com') return new Response('private provider response body', { status: 403 });
+    if (provider === 'updates.push.services.mozilla.com') throw new Error(`${url}: private network details`);
+    return new Response(null, { status: 201 });
+  };
+  try {
+    const result = await api.admin('/admin/push/test', { method: 'POST' });
+    assert.equal(result.response.status, 200);
+    assert.deepEqual(result.data, { sent: 1, expired: 1, failed: 2, errors: [
+      { provider: 'jmt17.google.com', status: 403 },
+      { provider: 'updates.push.services.mozilla.com', status: null },
+    ] });
+    assert.doesNotMatch(JSON.stringify(result.data), /private|secret|capability|p256dh|auth/);
+    assert.deepEqual(api.data.get('access-registry'), { ...before, subscriptions: [devices[0], devices[2], devices[3]] });
+  } finally { pushResponder = undefined; }
+});
+
+test('manual push tests fail with safe upstream details when no notification is delivered', async () => {
+  for (const status of [403, 503, null]) {
+    const api = service();
+    const device = subscription('https://jmt17.google.com/fcm/send/private-failure?secret=capability');
+    await api.admin('/admin/push', { method: 'POST', body: { subscription: device } });
+    await api.admin('/admin/push', { method: 'POST', body: { subscription: subscription('https://web.push.apple.com/private-expired') } });
+    pushResponder = url => {
+      if (new URL(url).hostname === 'web.push.apple.com') return new Response(null, { status: 410 });
+      if (status === null) throw new Error(`${url}: private network details`);
+      return new Response('private provider response body', { status });
+    };
+    try {
+      const result = await api.admin('/admin/push/test', { method: 'POST' });
+      assert.equal(result.response.status, 502);
+      const { message, ...diagnostics } = result.data;
+      assert.deepEqual(diagnostics, { error: 'push_delivery_failed', sent: 0, expired: 1, failed: 1, errors: [{ provider: 'jmt17.google.com', status }] });
+      assert.match(message, /jmt17\.google\.com/);
+      assert.match(message, status === null ? /conexión|tiempo de espera/ : new RegExp(`HTTP ${status}`));
+      assert.doesNotMatch(JSON.stringify(result.data), /private|secret|capability|p256dh|auth/);
+      assert.deepEqual((await api.admin('/admin/push')).data.endpoints, [device.endpoint]);
+    } finally { pushResponder = undefined; }
+  }
+});
+
+test('manual push tests with only expired devices remain successful and remove those devices', async () => {
+  const api = service();
+  await api.admin('/admin/push', { method: 'POST', body: { subscription: subscription() } });
+  pushResponder = () => new Response(null, { status: 410 });
+  try {
+    const result = await api.admin('/admin/push/test', { method: 'POST' });
+    assert.equal(result.response.status, 200);
+    assert.deepEqual(result.data, { sent: 0, expired: 1, failed: 0, errors: [] });
+    assert.equal((await api.admin('/admin/push')).data.subscriptions, 0);
+  } finally { pushResponder = undefined; }
+});
+
+test('manual push diagnostics require an authenticated owner before attempting delivery', async () => {
+  const api = service();
+  await api.admin('/admin/push', { method: 'POST', body: { subscription: subscription() } });
+  pushes = [];
+  for (const [token, status] of [[null, 401], [applicantToken, 403], [await sign('owner', { email: 'raulhdz40@gmail.com', exp: 1 }), 401]]) {
+    const result = await api.request('/admin/push/test', { method: 'POST', token });
+    assert.equal(result.response.status, status);
+    assert.equal(result.data.errors, undefined);
+  }
+  assert.equal(pushes.length, 0);
+});
+
+test('manual push configuration failures report each undelivered device without exposing storage errors', async () => {
+  const api = service();
+  const device = subscription('https://jmt17.google.com/fcm/send/private-device');
+  await api.admin('/admin/push', { method: 'POST', body: { subscription: device } });
+  const before = structuredClone(api.data.get('access-registry'));
+  const get = api.storage.get;
+  api.storage.get = async key => {
+    if (key === 'push-config') throw new Error('private config storage details');
+    return get(key);
+  };
+  pushes = [];
+  const result = await api.admin('/admin/push/test', { method: 'POST' });
+  assert.equal(result.response.status, 502);
+  const { message, ...diagnostics } = result.data;
+  assert.deepEqual(diagnostics, { error: 'push_delivery_failed', sent: 0, expired: 0, failed: 1, errors: [{ provider: 'jmt17.google.com', status: null }] });
+  assert.match(message, /jmt17\.google\.com/);
+  assert.doesNotMatch(message, /private|storage|config/);
+  assert.equal(pushes.length, 0);
+  assert.deepEqual(api.data.get('access-registry'), before);
+});
+
+test('background delivery rejection leaves sign-in responsive and preserves newer decisions', async () => {
+  const api = service({ background: true });
+  await api.admin('/admin/push', { method: 'POST', body: { subscription: subscription() } });
+  let rejectPush;
+  let pushStarted;
+  const started = new Promise(resolve => { pushStarted = resolve; });
+  pushResponder = () => new Promise((resolve, reject) => { rejectPush = reject; pushStarted(); });
+  const signIn = api.request();
+  try {
+    const responsive = await Promise.race([signIn.then(() => true), new Promise(resolve => setTimeout(() => resolve(false), 100))]);
+    assert.equal(responsive, true);
+    await started;
+    assert.equal((await api.admin('/admin/accounts/applicant', { method: 'PATCH', body: { status: 'approved', version: 1 } })).response.status, 200);
+    rejectPush(new Error('private network exception'));
+    await Promise.all(api.backgroundTasks);
+    assert.equal((await api.admin()).data.accounts[0].status, 'approved');
+    assert.equal((await api.admin('/admin/push')).data.subscriptions, 1);
+    assert.equal((await signIn).data.errors, undefined);
+  } finally {
+    if (rejectPush) rejectPush(new Error('private network exception'));
+    pushResponder = undefined;
+    await signIn;
+  }
+});
+
 test('background push delivery never holds sign-in or decisions and expiry cleanup preserves newer approvals', async () => {
   const api = service({ background: true });
   pushes = []; pushStatus = 201;

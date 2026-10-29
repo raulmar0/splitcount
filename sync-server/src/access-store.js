@@ -1,5 +1,5 @@
 import { errorResponse, HttpError, json, readJson } from './service.js';
-import { getPushConfig, sendAdminPush, validatePushSubscription, PushValidationError } from './push.js';
+import { getPushConfig, sendAdminPush, validatePushSubscription, PushValidationError, PushDeliveryError } from './push.js';
 
 export const OWNER_EMAIL = 'raulhdz40@gmail.com';
 export const MAX_ACCESS_ACCOUNTS = 2000;
@@ -40,17 +40,26 @@ export class AccessStore {
   }
 
   async #deliver(subscriptions) {
-    const result = { sent: 0, expired: 0, endpoints: new Set() };
+    const result = { sent: 0, expired: 0, failed: 0, errors: [], endpoints: new Set() };
     if (!subscriptions.length) return result;
+    const failed = (subscription, error) => {
+      let provider = 'desconocido';
+      try { provider = new URL(subscription.endpoint).hostname; } catch { /* A malformed stored URL cannot be identified safely. */ }
+      result.failed += 1;
+      result.errors.push({ provider, status: error instanceof PushDeliveryError ? error.status : null });
+    };
     try {
       const config = await getPushConfig(this.storage);
       const outcomes = await Promise.allSettled(subscriptions.map(subscription => sendAdminPush(subscription, config)));
       outcomes.forEach((outcome, index) => {
-        if (outcome.status !== 'fulfilled') return;
+        if (outcome.status !== 'fulfilled') { failed(subscriptions[index], outcome.reason); return; }
         if (outcome.value.expired) { result.endpoints.add(subscriptions[index].endpoint); result.expired += 1; }
         else result.sent += 1;
       });
-    } catch { /* Push is best effort; the durable request remains reviewable. */ }
+    } catch {
+      // Push is best effort; report safe diagnostics without retaining the error.
+      subscriptions.forEach(subscription => failed(subscription));
+    }
     return result;
   }
 
@@ -63,9 +72,9 @@ export class AccessStore {
   }
 
   async #notify(state) {
-    const { sent, expired, endpoints } = await this.#deliver(state.subscriptions);
+    const { sent, expired, failed, errors, endpoints } = await this.#deliver(state.subscriptions);
     try { await this.#pruneExpired(state, endpoints); } catch { /* Retry removal on a later delivery. */ }
-    return { sent, expired };
+    return { sent, expired, failed, errors };
   }
 
   #notifyInBackground(state) {
@@ -169,7 +178,15 @@ export class AccessStore {
     if (path === '/admin/accounts' && request.method === 'GET') return json({ revision: state.revision, accounts: state.accounts });
     if (path.startsWith('/admin/accounts/') && request.method === 'PATCH') return this.#decision(request, state, path.slice('/admin/accounts/'.length));
     if (path === '/admin/push') return this.#push(request, state);
-    if (path === '/admin/push/test' && request.method === 'POST') return json(await this.#notify(state));
+    if (path === '/admin/push/test' && request.method === 'POST') {
+      const result = await this.#notify(state);
+      if (result.sent === 0 && result.failed > 0) {
+        const { provider, status } = result.errors[0];
+        const detail = status === null ? 'sin respuesta del proveedor (conexión o tiempo de espera)' : `HTTP ${status}`;
+        return json({ error: 'push_delivery_failed', message: `No se pudo enviar la notificación mediante ${provider}: ${detail}.`, ...result }, 502);
+      }
+      return json(result);
+    }
     throw new HttpError(404, 'not_found', 'No se encontró esta ruta.');
   }
 }
